@@ -1,0 +1,225 @@
+/* Mediefilen ligger alltid i DOM-en, slik at lyden fortsetter mens eleven navigerer. */
+.mediaContainer {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  left: 0;
+  bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.mediaContainer video { width: 100%; height: 100%; background: #000; }
+
+/* Når video vises i fullskjermspilleren legges elementet oppå plassholderen i arket. */
+.mediaContainer[data-expanded="true"][data-video="true"] {
+  z-index: 61;
+  opacity: 1;
+  pointer-events: auto;
+  width: min(520px, calc(100vw - 40px));
+  height: auto;
+  aspect-ratio: 16 / 9;
+  left: 50%;
+  bottom: auto;
+  top: calc(env(safe-area-inset-top) + 86px); /* arkets toppmarg + topplinje + mellomrom */
+  transform: translateX(-50%);
+  border-radius: 14px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--bg);
+  overflow-y: auto;
+  animation: rise .28s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.sheet {
+  max-width: 560px;
+  margin: 0 auto;
+  min-height: 100%;
+  padding: calc(env(safe-area-inset-top) + 12px) 20px calc(env(safe-area-inset-bottom) + 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.sheetTop {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: var(--muted);
+}
+.iconButton {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+.iconButton:hover { background: var(--surface-2); }
+
+.cover {
+  aspect-ratio: 1;
+  width: min(100%, 360px);
+  align-self: center;
+  border-radius: 22px;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 24px 60px -24px rgba(26, 25, 23, .5);
+}
+.cover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 80% 15%, rgba(255, 255, 255, .22), transparent 45%),
+    repeating-radial-gradient(circle at 50% 120%, rgba(255, 255, 255, .07) 0 2px, transparent 2px 18px);
+}
+.cover span { position: relative; font-size: 11px; font-weight: 700; letter-spacing: .16em; opacity: .85; text-transform: uppercase; }
+.cover svg { position: relative; }
+
+.videoSpace,
+.embed {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  background: #000;
+  overflow: hidden;
+}
+.embed iframe { width: 100%; height: 100%; border: 0; display: block; }
+.embed p { color: #fff; padding: 24px; }
+
+.detail p { margin: 0 0 6px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.detail h2 { margin: 0 0 6px; font-family: var(--serif); font-size: clamp(24px, 6vw, 30px); line-height: 1.15; letter-spacing: -.01em; }
+.detail span { color: var(--muted); font-size: 14px; }
+
+.timeline input { width: 100%; accent-color: var(--ink); height: 28px; cursor: pointer; }
+.timeline div { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.controls { display: flex; align-items: center; justify-content: center; gap: 34px; }
+.controls > button {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  border-radius: 50%;
+}
+.controls > button:hover { background: var(--surface-2); }
+.controls small { position: absolute; font-size: 9px; font-weight: 800; top: 50%; left: 50%; transform: translate(-50%, -38%); }
+.controls svg { width: 30px; height: 30px; }
+.controls > .bigPlay { width: 78px; height: 78px; background: var(--ink); color: var(--bg); }
+.controls > .bigPlay:hover { background: var(--ink); transform: scale(1.04); }
+.controls > .bigPlay svg { width: 30px; height: 30px; }
+
+.settings { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.settings label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--surface);
+}
+.settings select {
+  border: 0;
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.embedHint { margin: 0; color: var(--muted); font-size: 14px; text-align: center; }
+
+.complete {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font-weight: 600;
+}
+.complete:hover { background: var(--surface-2); }
+
+.error { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--danger-soft); color: var(--danger); font-size: 14px; }
+
+/* ---------- Minispiller ---------- */
+.mini {
+  position: fixed;
+  z-index: 40;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  width: min(720px, calc(100vw - 20px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 8px;
+  border-radius: 18px;
+  background: var(--player-bg);
+  color: var(--player-ink);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .55);
+  overflow: hidden;
+  animation: rise .3s cubic-bezier(.2, .8, .2, 1);
+}
+.miniInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+}
+.miniInfo > span:last-child { min-width: 0; display: flex; flex-direction: column; }
+.miniInfo strong, .miniInfo small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.miniInfo strong { font-size: 14px; }
+.miniInfo small { font-size: 12px; opacity: .7; }
+.miniArt { flex: none; width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center; color: #fff; }
+.miniPlay {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 0;
+  display: grid;
+  place-items: center;
+  background: var(--player-ink);
+  color: var(--player-bg);
+}
+.miniProgress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, .14); }
+.miniProgress span { display: block; height: 100%; background: var(--player-ink); transition: width .25s linear; }
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay, .mini { animation: none; }
+}
