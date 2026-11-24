@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseSync as DatabaseSyncType, SQLInputValue } from "node:sqlite";
 import { dataPath } from "./data-path";
 import { hashPassword } from "./password";
@@ -75,7 +75,7 @@ function seedDemo(database: DatabaseSyncType) {
   if (database.prepare("SELECT 1 FROM teachers WHERE id = ?").get(DEMO_TEACHER_ID)) return;
   transaction(database, () => {
     database.prepare("INSERT INTO teachers (id, name, email, password_hash) VALUES (?, ?, ?, ?)")
-      .run(DEMO_TEACHER_ID, "Demolærer Historie", DEMO_EMAIL, hashPassword("historie123"));
+      .run(DEMO_TEACHER_ID, "Demolærer Historie", DEMO_EMAIL, hashPassword(demoPassword()));
     const course = demoCourse;
     database.prepare(`INSERT INTO courses (id, teacher_id, title, subject, class_label, description, code, accent_color)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -88,6 +88,12 @@ function seedDemo(database: DatabaseSyncType) {
       episode.run(item.id, item.topic_id, item.course_id, item.title, item.description, item.study_notes, item.media_type, item.media_url, item.embed_url, item.duration_seconds, item.sort_order);
     }
   });
+}
+
+// Demopassordet står i README, så i produksjon får demokontoen et tilfeldig passord ingen kjenner.
+function demoPassword() {
+  if (process.env.NODE_ENV !== "production") return "historie123";
+  return randomBytes(32).toString("hex");
 }
 
 function transaction<T>(database: DatabaseSyncType, work: () => T): T {

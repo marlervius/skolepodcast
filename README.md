@@ -16,7 +16,7 @@ npm run dev
 
 Åpne <http://localhost:3000>. Databasen (`data/lytterom.db`) opprettes og fylles med eksempeldata første gang en side eller et API-kall bruker den.
 
-**Demokonto i studio:** `demo@lytterom.no` / `historie123`. Eksempelfaget har klassekoden `HIST-VG3`.
+**Demokonto i studio:** `demo@lytterom.no` / `historie123`. Eksempelfaget har klassekoden `HIST-VG3`. I produksjon (`NODE_ENV=production`) får demokontoen et tilfeldig passord, slik at ingen kan logge inn på den. Eksempelfaget er fortsatt synlig for elevene.
 
 ### Nyttige kommandoer
 
@@ -33,6 +33,7 @@ npm run dev
 | `LYTTEROM_DATA_DIR` | `data` | Mappe for database, opplastinger og sesjonsnøkkel |
 | `LYTTEROM_SECRET` | genereres i `data/session-secret` | Minst 32 tegn. Brukes til å signere lærerens innloggingscookie |
 | `LYTTEROM_MAX_UPLOAD_MB` | `500` | Største tillatte filstørrelse ved opplasting |
+| `LYTTEROM_INVITE_CODE` | ingen | Kode nye lærere må oppgi for å opprette konto. I produksjon er registreringen stengt når den ikke er satt |
 
 ## Slik er appen bygget
 
@@ -49,7 +50,9 @@ Elevene har ingen konto. Fulgte klassekoder (`lytterom_followed_codes_v1`), frem
 
 ## Publisering
 
-Appen lagrer data på lokal disk og trenger derfor en server med vedvarende lagring, for eksempel en VPS, Railway, Fly.io eller Render med et «volume». Serveren må kjøre Node 22.13 eller nyere. Bruk HTTPS, ellers kan ikke appen installeres som PWA på mobil.
+Appen lagrer data på lokal disk og trenger derfor en server med vedvarende lagring, for eksempel en VPS, Railway, Fly.io eller Render med et «volume».
+
+`Dockerfile` bygger et produksjonsbilde som lagrer alt i `/data`. Monter et vedvarende volum der, og sett `LYTTEROM_SECRET` og `LYTTEROM_INVITE_CODE`. Serveren må kjøre Node 22.13 eller nyere. Bruk HTTPS, ellers kan ikke appen installeres som PWA på mobil.
 
 ```bash
 npm run build

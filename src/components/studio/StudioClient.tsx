@@ -38,6 +38,9 @@ export function StudioClient() {
 
 /* ---------- Innlogging og registrering ---------- */
 
+// Demokontoen har ukjent passord i produksjon, og nye kontoer krever invitasjonskode.
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
 function AuthScreen({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [busy, setBusy] = useState(false);
@@ -85,13 +88,20 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) =
             <input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={mode === "register" ? 8 : undefined} value={password} onChange={(event) => setPassword(event.target.value)} />
             {mode === "register" && <small>Minst 8 tegn.</small>}
           </label>
+          {mode === "register" && (
+            <label>
+              Invitasjonskode
+              <input name="invite" autoComplete="off" spellCheck={false} maxLength={200} required={IS_PRODUCTION} />
+              <small>Får du av den som har satt opp Lytterom for skolen.</small>
+            </label>
+          )}
           {error && <p className="studio-error" role="alert">{error}</p>}
           <button className="studio-button studio-button--primary studio-button--block" disabled={busy}>
             {busy && <LoaderCircle size={16} className="studio-spinner" />}
             {mode === "login" ? "Logg inn" : "Opprett konto"}
           </button>
         </form>
-        {mode === "login" && (
+        {mode === "login" && !IS_PRODUCTION && (
           <div className="studio-demo">
             <p><strong>Vil du prøve først?</strong> Logg inn med demokontoen og se eksempelfaget Historie VG3.</p>
             <button type="button" className="studio-button" onClick={() => { setEmail("demo@lytterom.no"); setPassword("historie123"); }}>Fyll inn demokonto</button>
