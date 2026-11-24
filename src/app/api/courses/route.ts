@@ -10,29 +10,29 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     if (params.has("code")) {
       const code = normalizeCode(params.get("code"));
-      const course = code ? getCourseSummaryByCode(code) : null;
+      const course = code ? await getCourseSummaryByCode(code) : null;
       if (!course) throw new HttpError(404, "Fant ikke noe fagrom med denne klassekoden.");
       return NextResponse.json({ course });
     }
     if (params.has("codes")) {
       const codes = [...new Set((params.get("codes") || "").split(",").map(normalizeCode).filter(Boolean))].slice(0, 50);
-      return NextResponse.json({ courses: getCourseSummariesByCodes(codes) });
+      return NextResponse.json({ courses: await getCourseSummariesByCodes(codes) });
     }
     if (params.get("mine") === "1") {
       const teacher = await requireTeacher();
-      return NextResponse.json({ courses: listTeacherCourses(teacher.id) });
+      return NextResponse.json({ courses: await listTeacherCourses(teacher.id) });
     }
     throw new HttpError(400, "Oppgi code, codes eller mine=1.");
   });
 }
 
 /** Lager en lesbar kode, f.eks. HIST-VG3, og legger på et tall hvis den er tatt. */
-function generateCode(subject: string, classLabel: string) {
+async function generateCode(subject: string, classLabel: string) {
   const base = normalizeCode(`${subject.replace(/\s+/g, "").slice(0, 4)}-${classLabel}`) || "FAG";
-  if (!isCodeTaken(base)) return base;
+  if (!(await isCodeTaken(base))) return base;
   for (let attempt = 2; attempt < 1000; attempt++) {
     const candidate = `${base}-${attempt}`.slice(0, 32);
-    if (!isCodeTaken(candidate)) return candidate;
+    if (!(await isCodeTaken(candidate))) return candidate;
   }
   return `${base}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
@@ -49,11 +49,11 @@ export async function POST(request: Request) {
     let code = normalizeCode(body.code);
     if (code) {
       if (code.length < 3) throw new HttpError(400, "Klassekoden må ha minst 3 tegn.");
-      if (isCodeTaken(code)) throw new HttpError(409, "Klassekoden er allerede i bruk. Velg en annen.");
+      if (await isCodeTaken(code)) throw new HttpError(409, "Klassekoden er allerede i bruk. Velg en annen.");
     } else {
-      code = generateCode(subject, classLabel);
+      code = await generateCode(subject, classLabel);
     }
-    const course = createCourse(teacher.id, {
+    const course = await createCourse(teacher.id, {
       title,
       subject,
       class_label: classLabel,

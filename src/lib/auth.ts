@@ -1,8 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { dataPath } from "./data-path";
 import { courseOwner, getTeacher } from "./db";
 import type { Teacher } from "./types";
 
@@ -10,16 +8,16 @@ export const SESSION_COOKIE = "lytterom_session";
 const SESSION_DAYS = 30;
 let cachedSecret: string | null = null;
 
-/** Hemmeligheten hentes fra miljøvariabel, ellers lages og lagres en lokal nøkkel første gang. */
+/**
+ * Hemmeligheten som signerer innloggingscookien. Må settes i produksjon.
+ * Under utvikling lages en midlertidig nøkkel, så innloggingen varer til serveren startes på nytt.
+ */
 function secret() {
   if (cachedSecret) return cachedSecret;
-  if (process.env.LYTTEROM_SECRET && process.env.LYTTEROM_SECRET.length >= 32) return (cachedSecret = process.env.LYTTEROM_SECRET);
-  const file = dataPath("session-secret");
-  if (!existsSync(file)) {
-    mkdirSync(dataPath(), { recursive: true });
-    writeFileSync(file, randomBytes(48).toString("hex"), { mode: 0o600 });
-  }
-  return (cachedSecret = readFileSync(file, "utf8").trim());
+  const configured = process.env.LYTTEROM_SECRET;
+  if (configured && configured.length >= 32) return (cachedSecret = configured);
+  if (process.env.NODE_ENV === "production") throw new Error("LYTTEROM_SECRET må være satt (minst 32 tegn).");
+  return (cachedSecret = randomBytes(48).toString("hex"));
 }
 
 function sign(payload: string) {
@@ -47,7 +45,7 @@ export function readSessionToken(token: string | undefined): string | null {
 export async function currentTeacher(): Promise<Teacher | null> {
   const store = await cookies();
   const id = readSessionToken(store.get(SESSION_COOKIE)?.value);
-  return id ? getTeacher(id) : null;
+  return id ? await getTeacher(id) : null;
 }
 
 export function setSessionCookie(response: NextResponse, teacherId: string) {
@@ -87,7 +85,7 @@ export async function requireTeacher() {
 /** Sikrer at innlogget lærer eier fagrommet. */
 export async function requireCourseOwner(courseId: string) {
   const teacher = await requireTeacher();
-  const owner = courseOwner(courseId);
+  const owner = await courseOwner(courseId);
   if (!owner) throw new HttpError(404, "Fant ikke fagrommet.");
   if (owner !== teacher.id) throw new HttpError(403, "Du har ikke tilgang til dette fagrommet.");
   return teacher;

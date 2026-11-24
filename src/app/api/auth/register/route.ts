@@ -16,8 +16,8 @@ export async function POST(request: Request) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, "Skriv inn en gyldig e-postadresse.");
     if (password.length < 8) throw new HttpError(400, "Passordet må ha minst 8 tegn.");
     if (password.length > 200) throw new HttpError(400, "Passordet er for langt.");
-    if (findTeacherByEmail(email)) throw new HttpError(409, "Det finnes allerede en konto med denne e-postadressen.");
-    const teacher = createTeacher(name, email, hashPassword(password));
+    if (await findTeacherByEmail(email)) throw new HttpError(409, "Det finnes allerede en konto med denne e-postadressen.");
+    const teacher = await createTeacher(name, email, hashPassword(password));
     return setSessionCookie(NextResponse.json({ teacher }, { status: 201 }), teacher.id);
   });
 }

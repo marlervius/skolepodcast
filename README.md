@@ -7,16 +7,18 @@
 
 ## Kom i gang lokalt
 
-Krever **Node.js 22.13 eller nyere**, fordi databasen bruker Node sin innebygde `node:sqlite`.
+Appen bruker **Supabase** til database og filer, også lokalt. Krever Node.js 22 eller nyere.
+
+1. Opprett et gratis prosjekt på [supabase.com](https://supabase.com). Åpne **SQL Editor**, lim inn hele `supabase/schema.sql` og trykk **Run**.
+2. Kopier `.env.example` til `.env.local` og fyll inn `SUPABASE_URL` og `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API), og en `LYTTEROM_SECRET` på minst 32 tegn.
+3. Start appen:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Åpne <http://localhost:3000>. Databasen (`data/lytterom.db`) opprettes og fylles med eksempeldata første gang en side eller et API-kall bruker den.
-
-**Demokonto i studio:** `demo@lytterom.no` / `historie123`. Eksempelfaget har klassekoden `HIST-VG3`. I produksjon (`NODE_ENV=production`) får demokontoen et tilfeldig passord, slik at ingen kan logge inn på den. Eksempelfaget er fortsatt synlig for elevene.
+Åpne <http://localhost:3000>. Eksempelfaget med klassekoden `HIST-VG3` legges inn automatisk første gang. Det finnes ingen demokonto: lag din egen lærerkonto i `/studio`. Under utvikling trengs ingen invitasjonskode.
 
 ### Nyttige kommandoer
 
@@ -26,21 +28,22 @@ npm run dev
 | `npm run build` og `npm start` | Produksjonsbygg |
 | `npm run typecheck` | TypeScript-sjekk |
 
-### Miljøvariabler (valgfrie)
+### Miljøvariabler
 
-| Variabel | Standard | Forklaring |
+| Variabel | Påkrevd | Forklaring |
 | --- | --- | --- |
-| `LYTTEROM_DATA_DIR` | `data` | Mappe for database, opplastinger og sesjonsnøkkel |
-| `LYTTEROM_SECRET` | genereres i `data/session-secret` | Minst 32 tegn. Brukes til å signere lærerens innloggingscookie |
-| `LYTTEROM_MAX_UPLOAD_MB` | `500` | Største tillatte filstørrelse ved opplasting |
-| `LYTTEROM_INVITE_CODE` | ingen | Kode nye lærere må oppgi for å opprette konto. I produksjon er registreringen stengt når den ikke er satt |
+| `SUPABASE_URL` | ja | Adressen til Supabase-prosjektet |
+| `SUPABASE_SERVICE_ROLE_KEY` | ja | Hemmelig nøkkel. Brukes bare på serveren og må aldri deles |
+| `LYTTEROM_SECRET` | i produksjon | Minst 32 tegn. Signerer lærerens innloggingscookie |
+| `LYTTEROM_INVITE_CODE` | i produksjon | Kode nye lærere må oppgi. Uten den er registreringen stengt i produksjon |
+| `LYTTEROM_MAX_UPLOAD_MB` | nei | Største filstørrelse, standard 50 (grensen på Supabase sin gratisplan) |
 
 ## Slik er appen bygget
 
 - **Next.js 16 (App Router), React 19 og TypeScript.** Stilene er skrevet i vanlig CSS (`src/app/globals.css`, `src/app/studio/studio.css`, `src/components/player/Player.module.css`).
-- **Database:** `src/lib/db.ts`, som bruker `node:sqlite`. Modulen hentes med `process.getBuiltinModule`, så bundleren aldri prøver å pakke den.
+- **Database:** `src/lib/db.ts` bruker Supabase (PostgreSQL) med service role-nøkkelen, bare fra serveren. Skjemaet ligger i `supabase/schema.sql`. Tabellene har Row Level Security uten regler, så den offentlige anon-nøkkelen gir ingen tilgang.
 - **Innlogging:** `src/lib/auth.ts` og `src/lib/password.ts`. Passord hashes med scrypt og unikt salt. Sesjonen lagres i en HMAC-SHA256-signert `HttpOnly`-cookie.
-- **Filer:** `src/lib/storage.ts` sjekker filtype og størrelse og lagrer i `data/uploads/`. Filene strømmes fra `/api/media/[filnavn]` med `206 Partial Content`, slik at spoling fungerer på mobil.
+- **Filer:** `/api/uploads` sjekker filtype og størrelse og gir en tidsbegrenset opplastingslenke. Nettleseren laster opp direkte til bucketen `episode-media` i Supabase Storage, fordi Vercel bare tar imot omtrent 4,5 MB per forespørsel. Elevene strømmer fra bucketens offentlige adresse, som støtter spoling.
 - **Spiller:** `src/context/PlayerContext.tsx` har minispiller, fullskjermspiller, Media Session API, hastighet, søvntimer og fremgang i `localStorage`.
 - **PWA:** `public/manifest.json` og `public/sw.js`. Service workeren registreres bare i produksjon og slipper Range-forespørsler og API-kall rett gjennom.
 
@@ -48,19 +51,10 @@ npm run dev
 
 Elevene har ingen konto. Fulgte klassekoder (`lytterom_followed_codes_v1`), fremgang (`lytterom_progress_v1`), sist spilte episode, hastighet og tema lagres bare i elevens egen nettleser. Serveren lagrer bare lærerkontoer og innholdet lærerne publiserer. YouTube-videoer bygges inn via `youtube-nocookie.com`.
 
-## Publisering
+## Publisering (Vercel)
 
-Appen lagrer data på lokal disk og trenger derfor en server med vedvarende lagring, for eksempel en VPS, Railway, Fly.io eller Render med et «volume».
+1. Importer GitHub-repoet på [vercel.com/new](https://vercel.com/new). Vercel finner Next.js selv.
+2. Legg inn de fire påkrevde miljøvariablene under **Settings → Environment Variables**, og deploy på nytt.
+3. `vercel.json` setter opp en daglig cron-jobb mot `/api/health`. Den holder Supabase-prosjektet aktivt, fordi gratisprosjekter settes på pause etter en uke uten aktivitet.
 
-`Dockerfile` bygger et produksjonsbilde som lagrer alt i `/data`. Monter et vedvarende volum der, og sett `LYTTEROM_SECRET` og `LYTTEROM_INVITE_CODE`. Serveren må kjøre Node 22.13 eller nyere. Bruk HTTPS, ellers kan ikke appen installeres som PWA på mobil.
-
-```bash
-npm run build
-LYTTEROM_SECRET="<lang tilfeldig streng>" LYTTEROM_DATA_DIR=/var/lytterom npm start
-```
-
-Vercel har ikke vedvarende disk. Der må lagringslaget byttes ut slik:
-
-1. Opprett et Supabase-prosjekt og kjør `supabase/schema.sql`. Skjemaet lager også `episode-media`-bucketen.
-2. Skriv om funksjonene i `src/lib/db.ts` til Supabase-klienten. Funksjonsnavnene og returtypene kan beholdes.
-3. Bytt ut `saveUpload` og `deleteMedia` i `src/lib/storage.ts` med Supabase Storage, og la `media_url` peke til den offentlige adressen.
+Vercel gir HTTPS automatisk, så elevene kan installere appen fra Safari med «Legg til på Hjem-skjerm».

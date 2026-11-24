@@ -7,18 +7,18 @@ import { normalizeCode } from "@/lib/types";
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ code: string }> };
 
-function load(code: string) {
+async function load(code: string) {
   const normalized = normalizeCode(decodeURIComponent(code));
   return normalized ? getCourseByCode(normalized) : null;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const course = load((await params).code);
+  const course = await load((await params).code);
   return course ? { title: course.title, description: course.description || `${course.subject} med ${course.teacher_name}` } : { title: "Fant ikke fagrommet" };
 }
 
 export default async function CoursePage({ params }: Props) {
-  const course = load((await params).code);
+  const course = await load((await params).code);
   if (!course) {
     return (
       <div className="page">

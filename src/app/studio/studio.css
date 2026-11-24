@@ -56,9 +56,6 @@
 .studio-auth-intro li { display: flex; align-items: center; gap: 10px; color: var(--muted); font-weight: 550; }
 .studio-auth-intro li svg { color: var(--terracotta); flex: none; }
 .studio-auth-card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 22px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 18px; }
-.studio-demo { border-top: 1px solid var(--line); padding-top: 16px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
-.studio-demo p { margin: 0; font-size: 14px; color: var(--muted); }
-.studio-demo strong { color: var(--ink); }
 @media (min-width: 860px) {
   .studio-auth { grid-template-columns: 1.1fr 1fr; gap: 56px; padding-top: 72px; }
 }

@@ -9,7 +9,7 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   return handle(async () => {
-    const course = getCourse((await params).id);
+    const course = await getCourse((await params).id);
     if (!course) throw new HttpError(404, "Fant ikke fagrommet.");
     return NextResponse.json({ course });
   });
@@ -35,10 +35,10 @@ export async function PATCH(request: Request, { params }: Context) {
     if (body.code !== undefined) {
       const code = normalizeCode(body.code);
       if (code.length < 3) throw new HttpError(400, "Klassekoden må ha minst 3 tegn.");
-      if (isCodeTaken(code, id)) throw new HttpError(409, "Klassekoden er allerede i bruk. Velg en annen.");
+      if (await isCodeTaken(code, id)) throw new HttpError(409, "Klassekoden er allerede i bruk. Velg en annen.");
       input.code = code;
     }
-    return NextResponse.json({ course: updateCourse(id, input) });
+    return NextResponse.json({ course: await updateCourse(id, input) });
   });
 }
 
@@ -46,7 +46,7 @@ export async function DELETE(_request: Request, { params }: Context) {
   return handle(async () => {
     const { id } = await params;
     await requireCourseOwner(id);
-    await deleteMediaFiles(deleteCourse(id));
+    await deleteMediaFiles(await deleteCourse(id));
     return new NextResponse(null, { status: 204 });
   });
 }

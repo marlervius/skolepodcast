@@ -19,22 +19,35 @@ export function studioJson(method: "POST" | "PATCH", data: object): RequestInit 
   };
 }
 
-export function uploadEpisode(data: FormData, onProgress: (percent: number) => void) {
-  return new Promise<void>((resolve, reject) => {
+type UploadTicket = { upload_url: string; upload_path: string; content_type: string };
+
+/**
+ * Laster opp en fil direkte til Supabase Storage og lager episoden etterpå.
+ * Serveren gir en tidsbegrenset opplastingslenke, så filen aldri går gjennom Vercel.
+ */
+export async function uploadEpisode(file: File, fields: Record<string, unknown>, onProgress: (percent: number) => void) {
+  const ticket = await studioRequest<UploadTicket>("/api/uploads", studioJson("POST", {
+    course_id: fields.course_id, filename: file.name, size: file.size,
+  }));
+  await new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", "/api/episodes");
-    request.responseType = "json";
+    request.open("PUT", ticket.upload_url);
+    request.setRequestHeader("Content-Type", ticket.content_type);
+    request.setRequestHeader("Cache-Control", "max-age=31536000");
+    request.setRequestHeader("x-upsert", "false");
     request.upload.onprogress = ({ lengthComputable, loaded, total }) => {
       if (lengthComputable) onProgress(Math.round((loaded / total) * 100));
     };
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) resolve();
-      else reject(new Error(request.response?.error || "Opplastingen mislyktes. Prøv igjen."));
+      else if (request.status === 413) reject(new Error("Filen er for stor for lagringen."));
+      else reject(new Error("Opplastingen mislyktes. Prøv igjen."));
     };
     request.onerror = () => reject(new Error("Forbindelsen ble brutt under opplastingen."));
     request.onabort = () => reject(new Error("Opplastingen ble avbrutt."));
-    request.send(data);
+    request.send(file);
   });
+  await studioRequest("/api/episodes", studioJson("POST", { ...fields, upload_path: ticket.upload_path }));
 }
 
 export function messageFrom(error: unknown) {

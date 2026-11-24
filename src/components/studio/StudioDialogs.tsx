@@ -267,14 +267,9 @@ export function EpisodeDialog({
             ...values, course_id: course.id, topic_id: topic.id,
           }));
         } else if (file) {
-          const data = new FormData();
-          for (const [key, value] of Object.entries(values)) data.append(key, value);
-          data.append("file", file);
-          data.append("course_id", course.id);
-          data.append("topic_id", topic.id);
-          data.append("duration_seconds", String(await duration.current));
+          const fields = { ...values, course_id: course.id, topic_id: topic.id, duration_seconds: await duration.current };
           setProgress(0);
-          await uploadEpisode(data, setProgress);
+          await uploadEpisode(file, fields, setProgress);
         }
         await saved(episode ? "Episoden er oppdatert." : "Episoden er publisert.");
       } finally {
@@ -328,7 +323,7 @@ export function EpisodeDialog({
                 <button type="button" className="studio-button" disabled={busy} onClick={() => filePicker.current?.click()}>
                   {file ? "Velg en annen fil" : "Velg fil"}
                 </button>
-                <small>MP3, M4A, WAV, OGG, AAC, FLAC, MP4, WEBM og MOV</small>
+                <small>MP3, M4A, WAV, OGG, AAC, FLAC, MP4, WEBM og MOV, maks 50 MB. Lengre videoer kan legges på YouTube.</small>
                 {fileError && <p className="studio-error" role="alert">{fileError}</p>}
               </div>
             ) : (

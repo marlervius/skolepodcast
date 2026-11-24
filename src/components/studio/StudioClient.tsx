@@ -38,7 +38,7 @@ export function StudioClient() {
 
 /* ---------- Innlogging og registrering ---------- */
 
-// Demokontoen har ukjent passord i produksjon, og nye kontoer krever invitasjonskode.
+// I produksjon krever nye lærerkontoer invitasjonskode.
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) => void }) {
@@ -101,12 +101,6 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) =
             {mode === "login" ? "Logg inn" : "Opprett konto"}
           </button>
         </form>
-        {mode === "login" && !IS_PRODUCTION && (
-          <div className="studio-demo">
-            <p><strong>Vil du prøve først?</strong> Logg inn med demokontoen og se eksempelfaget Historie VG3.</p>
-            <button type="button" className="studio-button" onClick={() => { setEmail("demo@lytterom.no"); setPassword("historie123"); }}>Fyll inn demokonto</button>
-          </div>
-        )}
       </section>
     </div>
   );

@@ -1,182 +1,108 @@
-import { mkdirSync } from "node:fs";
-import { randomBytes, randomUUID } from "node:crypto";
-import type { DatabaseSync as DatabaseSyncType, SQLInputValue } from "node:sqlite";
-import { dataPath } from "./data-path";
-import { hashPassword } from "./password";
+import { randomUUID } from "node:crypto";
 import { DEMO_COURSE_ID, DEMO_EMAIL, DEMO_TEACHER_ID, demoCourse, demoEpisodes, demoTopics } from "./demo";
+import { check, supabase } from "./supabase";
 import type { Course, CourseSummary, Episode, MediaType, Teacher, Topic } from "./types";
 
-// node:sqlite hentes direkte fra Node sin innebygde modulliste, slik at bundleren aldri prøver å løse den opp.
-const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+/*
+ * Datalaget. Alt går via Supabase (PostgreSQL) med service role-nøkkelen.
+ * Tabellene og visningen course_summaries er definert i supabase/schema.sql.
+ */
 
-type Row = Record<string, SQLInputValue>;
-const globalForDb = globalThis as unknown as { lytteromDb?: DatabaseSyncType };
+let seeded: Promise<void> | null = null;
 
-const SCHEMA = `
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
-CREATE TABLE IF NOT EXISTS teachers (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  password_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);
-CREATE TABLE IF NOT EXISTS courses (
-  id TEXT PRIMARY KEY,
-  teacher_id TEXT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  subject TEXT NOT NULL DEFAULT '',
-  class_label TEXT NOT NULL DEFAULT '',
-  description TEXT NOT NULL DEFAULT '',
-  code TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  accent_color TEXT NOT NULL DEFAULT '#C0563B',
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);
-CREATE TABLE IF NOT EXISTS topics (
-  id TEXT PRIMARY KEY,
-  course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);
-CREATE TABLE IF NOT EXISTS episodes (
-  id TEXT PRIMARY KEY,
-  topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
-  course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  study_notes TEXT NOT NULL DEFAULT '',
-  media_type TEXT NOT NULL CHECK (media_type IN ('audio','video','embed')),
-  media_url TEXT NOT NULL DEFAULT '',
-  embed_url TEXT NOT NULL DEFAULT '',
-  duration_seconds INTEGER NOT NULL DEFAULT 0,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);
-CREATE INDEX IF NOT EXISTS idx_courses_teacher ON courses(teacher_id);
-CREATE INDEX IF NOT EXISTS idx_topics_course ON topics(course_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_episodes_topic ON episodes(topic_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_episodes_course ON episodes(course_id);
-`;
-
-function db(): DatabaseSyncType {
-  if (globalForDb.lytteromDb) return globalForDb.lytteromDb;
-  mkdirSync(dataPath(), { recursive: true });
-  const database = new DatabaseSync(dataPath("lytterom.db"));
-  database.exec(SCHEMA);
-  seedDemo(database);
-  globalForDb.lytteromDb = database;
-  return database;
-}
-
-function seedDemo(database: DatabaseSyncType) {
-  if (database.prepare("SELECT 1 FROM teachers WHERE id = ?").get(DEMO_TEACHER_ID)) return;
-  transaction(database, () => {
-    database.prepare("INSERT INTO teachers (id, name, email, password_hash) VALUES (?, ?, ?, ?)")
-      .run(DEMO_TEACHER_ID, "Demolærer Historie", DEMO_EMAIL, hashPassword(demoPassword()));
-    const course = demoCourse;
-    database.prepare(`INSERT INTO courses (id, teacher_id, title, subject, class_label, description, code, accent_color)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(DEMO_COURSE_ID, DEMO_TEACHER_ID, course.title, course.subject, course.class_label, course.description, course.code, course.accent_color);
-    const topic = database.prepare("INSERT INTO topics (id, course_id, title, description, sort_order) VALUES (?, ?, ?, ?, ?)");
-    for (const item of demoTopics) topic.run(item.id, item.course_id, item.title, item.description, item.sort_order);
-    const episode = database.prepare(`INSERT INTO episodes (id, topic_id, course_id, title, description, study_notes, media_type, media_url, embed_url, duration_seconds, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    for (const item of demoEpisodes) {
-      episode.run(item.id, item.topic_id, item.course_id, item.title, item.description, item.study_notes, item.media_type, item.media_url, item.embed_url, item.duration_seconds, item.sort_order);
-    }
-  });
-}
-
-// Demopassordet står i README, så i produksjon får demokontoen et tilfeldig passord ingen kjenner.
-function demoPassword() {
-  if (process.env.NODE_ENV !== "production") return "historie123";
-  return randomBytes(32).toString("hex");
-}
-
-function transaction<T>(database: DatabaseSyncType, work: () => T): T {
-  database.exec("BEGIN");
-  try {
-    const result = work();
-    database.exec("COMMIT");
-    return result;
-  } catch (error) {
-    database.exec("ROLLBACK");
+/** Henter klienten og sørger for at eksempelfaget finnes. Seedingen kjøres én gang per serverinstans. */
+async function db() {
+  const client = supabase();
+  seeded ??= seedDemo().catch((error) => {
+    seeded = null;
     throw error;
-  }
+  });
+  await seeded;
+  return client;
 }
 
-function plain<T>(row: unknown): T {
-  return { ...(row as object) } as T;
-}
-function all<T>(sql: string, ...params: SQLInputValue[]): T[] {
-  return db().prepare(sql).all(...params).map((row) => plain<T>(row));
-}
-function one<T>(sql: string, ...params: SQLInputValue[]): T | null {
-  const row = db().prepare(sql).get(...params);
-  return row ? plain<T>(row) : null;
-}
-function run(sql: string, ...params: SQLInputValue[]) {
-  return db().prepare(sql).run(...params);
+/**
+ * Legger inn eksempelfaget Historie VG3 hvis det mangler. Demokontoen får et passord-hash
+ * som aldri kan stemme, så ingen kan logge inn på den. Elevene ser fortsatt faget.
+ */
+async function seedDemo() {
+  const client = supabase();
+  const existing = check(await client.from("teachers").select("id").eq("id", DEMO_TEACHER_ID).maybeSingle());
+  if (existing) return;
+  const ignore = { onConflict: "id", ignoreDuplicates: true };
+  check(await client.from("teachers").upsert({ id: DEMO_TEACHER_ID, name: "Demolærer Historie", email: DEMO_EMAIL, password_hash: "!" }, ignore));
+  check(await client.from("courses").upsert({ id: DEMO_COURSE_ID, teacher_id: DEMO_TEACHER_ID, ...demoCourse }, ignore));
+  check(await client.from("topics").upsert(demoTopics, ignore));
+  check(await client.from("episodes").upsert(demoEpisodes, ignore));
 }
 
 /* ---------- Lærere ---------- */
 
-export function createTeacher(name: string, email: string, passwordHash: string): Teacher {
-  const id = randomUUID();
-  run("INSERT INTO teachers (id, name, email, password_hash) VALUES (?, ?, ?, ?)", id, name, email, passwordHash);
-  return getTeacher(id)!;
+const TEACHER_FIELDS = "id, name, email, created_at";
+
+export async function createTeacher(name: string, email: string, passwordHash: string): Promise<Teacher> {
+  const client = await db();
+  return check(await client.from("teachers").insert({ id: randomUUID(), name, email, password_hash: passwordHash }).select(TEACHER_FIELDS).single());
 }
-export function getTeacher(id: string) {
-  return one<Teacher>("SELECT id, name, email, created_at FROM teachers WHERE id = ?", id);
+export async function getTeacher(id: string): Promise<Teacher | null> {
+  const client = await db();
+  return check(await client.from("teachers").select(TEACHER_FIELDS).eq("id", id).maybeSingle());
 }
-export function findTeacherByEmail(email: string) {
-  return one<Teacher & { password_hash: string }>("SELECT * FROM teachers WHERE email = ?", email);
+export async function findTeacherByEmail(email: string): Promise<(Teacher & { password_hash: string }) | null> {
+  const client = await db();
+  return check(await client.from("teachers").select("*").eq("email", email.toLowerCase()).maybeSingle());
 }
 
 /* ---------- Fagrom ---------- */
 
-const SUMMARY_SELECT = `
-SELECT c.*, t.name AS teacher_name,
-  (SELECT COUNT(*) FROM episodes e WHERE e.course_id = c.id) AS episode_count,
-  (SELECT COUNT(*) FROM topics tp WHERE tp.course_id = c.id) AS topic_count
-FROM courses c JOIN teachers t ON t.id = c.teacher_id`;
-
-export function listTeacherCourses(teacherId: string) {
-  return all<CourseSummary>(`${SUMMARY_SELECT} WHERE c.teacher_id = ? ORDER BY c.created_at DESC`, teacherId);
+function summaries() {
+  return supabase().from("course_summaries").select("*");
 }
-export function getCourseSummariesByCodes(codes: string[]) {
+
+export async function listTeacherCourses(teacherId: string): Promise<CourseSummary[]> {
+  await db();
+  return check(await summaries().eq("teacher_id", teacherId).order("created_at", { ascending: false }));
+}
+export async function getCourseSummariesByCodes(codes: string[]): Promise<CourseSummary[]> {
   if (!codes.length) return [];
-  const rows = all<CourseSummary>(`${SUMMARY_SELECT} WHERE c.code IN (${codes.map(() => "?").join(",")})`, ...codes);
+  await db();
   const order = codes.map((code) => code.toUpperCase());
+  const rows: CourseSummary[] = check(await summaries().in("code", order));
   return rows.sort((a, b) => order.indexOf(a.code.toUpperCase()) - order.indexOf(b.code.toUpperCase()));
 }
-export function getCourseSummaryByCode(code: string) {
-  return one<CourseSummary>(`${SUMMARY_SELECT} WHERE c.code = ?`, code);
+export async function getCourseSummaryByCode(code: string): Promise<CourseSummary | null> {
+  await db();
+  return check(await summaries().eq("code", code.toUpperCase()).maybeSingle());
 }
-function getCourseSummary(id: string) {
-  return one<CourseSummary>(`${SUMMARY_SELECT} WHERE c.id = ?`, id);
+async function getCourseSummary(id: string): Promise<CourseSummary | null> {
+  await db();
+  return check(await summaries().eq("id", id).maybeSingle());
 }
 
-function withContent(summary: CourseSummary | null): Course | null {
+async function withContent(summary: CourseSummary | null): Promise<Course | null> {
   if (!summary) return null;
-  const topics = all<Omit<Topic, "episodes">>("SELECT * FROM topics WHERE course_id = ? ORDER BY sort_order, created_at", summary.id);
-  const episodes = all<Episode>("SELECT * FROM episodes WHERE course_id = ? ORDER BY sort_order, created_at", summary.id);
+  const client = await db();
+  const [topics, episodes] = await Promise.all([
+    client.from("topics").select("*").eq("course_id", summary.id).order("sort_order").order("created_at"),
+    client.from("episodes").select("*").eq("course_id", summary.id).order("sort_order").order("created_at"),
+  ]);
+  const topicRows: Omit<Topic, "episodes">[] = check(topics);
+  const episodeRows: Episode[] = check(episodes);
   return {
     ...summary,
-    topics: topics.map((topic) => ({ ...topic, episodes: episodes.filter((episode) => episode.topic_id === topic.id) })),
+    topics: topicRows.map((topic) => ({ ...topic, episodes: episodeRows.filter((episode) => episode.topic_id === topic.id) })),
   };
 }
-export function getCourse(id: string) {
-  return withContent(getCourseSummary(id));
+export async function getCourse(id: string) {
+  return withContent(await getCourseSummary(id));
 }
-export function getCourseByCode(code: string) {
-  return withContent(getCourseSummaryByCode(code));
+export async function getCourseByCode(code: string) {
+  return withContent(await getCourseSummaryByCode(code));
 }
-export function isCodeTaken(code: string, exceptId = "") {
-  return Boolean(one("SELECT id FROM courses WHERE code = ? AND id <> ?", code, exceptId));
+export async function isCodeTaken(code: string, exceptId = "") {
+  const client = await db();
+  const rows: { id: string }[] = check(await client.from("courses").select("id").eq("code", code.toUpperCase()).neq("id", exceptId).limit(1));
+  return rows.length > 0;
 }
 
 export type CourseInput = {
@@ -188,67 +114,80 @@ export type CourseInput = {
   accent_color: string;
 };
 
-export function createCourse(teacherId: string, input: CourseInput, firstTopicTitle: string) {
+export async function createCourse(teacherId: string, input: CourseInput, firstTopicTitle: string) {
+  const client = await db();
   const id = randomUUID();
-  transaction(db(), () => {
-    run(`INSERT INTO courses (id, teacher_id, title, subject, class_label, description, code, accent_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, teacherId, input.title, input.subject, input.class_label, input.description, input.code, input.accent_color);
-    run("INSERT INTO topics (id, course_id, title, description, sort_order) VALUES (?, ?, ?, '', 0)", randomUUID(), id, firstTopicTitle);
-  });
-  return getCourse(id)!;
+  check(await client.from("courses").insert({ id, teacher_id: teacherId, ...input }));
+  const topic = await client.from("topics").insert({ id: randomUUID(), course_id: id, title: firstTopicTitle, description: "", sort_order: 0 });
+  if (topic.error) {
+    await client.from("courses").delete().eq("id", id);
+    check(topic);
+  }
+  return (await getCourse(id))!;
 }
-export function updateCourse(id: string, input: Partial<CourseInput>) {
-  const fields = (["title", "subject", "class_label", "description", "code", "accent_color"] as const).filter((key) => input[key] !== undefined);
-  if (fields.length) run(`UPDATE courses SET ${fields.map((key) => `${key} = ?`).join(", ")} WHERE id = ?`, ...fields.map((key) => input[key]!), id);
-  return getCourse(id)!;
+export async function updateCourse(id: string, input: Partial<CourseInput>) {
+  const client = await db();
+  const fields = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+  if (Object.keys(fields).length) check(await client.from("courses").update(fields).eq("id", id));
+  return (await getCourse(id))!;
 }
 /** Sletter fagrommet og returnerer adressene til opplastede filer som må ryddes bort. */
-export function deleteCourse(id: string) {
-  const media = all<{ media_url: string }>("SELECT media_url FROM episodes WHERE course_id = ?", id).map((row) => row.media_url);
-  run("DELETE FROM courses WHERE id = ?", id);
-  return media;
+export async function deleteCourse(id: string) {
+  const client = await db();
+  const rows: { media_url: string }[] = check(await client.from("episodes").select("media_url").eq("course_id", id));
+  check(await client.from("courses").delete().eq("id", id));
+  return rows.map((row) => row.media_url);
 }
-export function courseOwner(id: string) {
-  return one<{ teacher_id: string }>("SELECT teacher_id FROM courses WHERE id = ?", id)?.teacher_id ?? null;
+export async function courseOwner(id: string) {
+  const client = await db();
+  const row: { teacher_id: string } | null = check(await client.from("courses").select("teacher_id").eq("id", id).maybeSingle());
+  return row?.teacher_id ?? null;
 }
 
 /* ---------- Kapitler ---------- */
 
-export function createTopic(courseId: string, title: string, description: string) {
-  const id = randomUUID();
-  const next = one<{ next: number }>("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM topics WHERE course_id = ?", courseId)!.next;
-  run("INSERT INTO topics (id, course_id, title, description, sort_order) VALUES (?, ?, ?, ?, ?)", id, courseId, title, description, next);
-  return getTopic(id)!;
+async function nextSortOrder(table: "topics" | "episodes", parentColumn: "course_id" | "topic_id", parentId: string) {
+  const client = await db();
+  const rows: { sort_order: number }[] = check(await client.from(table).select("sort_order").eq(parentColumn, parentId).order("sort_order", { ascending: false }).limit(1));
+  return rows.length ? rows[0].sort_order + 1 : 0;
 }
-export function getTopic(id: string) {
-  return one<Omit<Topic, "episodes">>("SELECT * FROM topics WHERE id = ?", id);
+
+export async function createTopic(courseId: string, title: string, description: string) {
+  const client = await db();
+  const row = { id: randomUUID(), course_id: courseId, title, description, sort_order: await nextSortOrder("topics", "course_id", courseId) };
+  return check(await client.from("topics").insert(row).select("*").single()) as Omit<Topic, "episodes">;
 }
-export function updateTopic(id: string, input: { title?: string; description?: string }) {
-  if (input.title !== undefined) run("UPDATE topics SET title = ? WHERE id = ?", input.title, id);
-  if (input.description !== undefined) run("UPDATE topics SET description = ? WHERE id = ?", input.description, id);
-  return getTopic(id)!;
+export async function getTopic(id: string): Promise<Omit<Topic, "episodes"> | null> {
+  const client = await db();
+  return check(await client.from("topics").select("*").eq("id", id).maybeSingle());
 }
-export function deleteTopic(id: string) {
-  const media = all<{ media_url: string }>("SELECT media_url FROM episodes WHERE topic_id = ?", id).map((row) => row.media_url);
-  run("DELETE FROM topics WHERE id = ?", id);
-  return media;
+export async function updateTopic(id: string, input: { title?: string; description?: string }) {
+  const client = await db();
+  const fields = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+  if (Object.keys(fields).length) check(await client.from("topics").update(fields).eq("id", id));
+  return (await getTopic(id))!;
+}
+export async function deleteTopic(id: string) {
+  const client = await db();
+  const rows: { media_url: string }[] = check(await client.from("episodes").select("media_url").eq("topic_id", id));
+  check(await client.from("topics").delete().eq("id", id));
+  return rows.map((row) => row.media_url);
 }
 
 /** Flytter et kapittel eller en episode ett steg opp eller ned blant søsknene. */
-function move(table: "topics" | "episodes", parentColumn: "course_id" | "topic_id", id: string, direction: "up" | "down") {
-  const item = one<Record<string, string>>(`SELECT ${parentColumn} AS parent FROM ${table} WHERE id = ?`, id);
+async function move(table: "topics" | "episodes", parentColumn: "course_id" | "topic_id", id: string, direction: "up" | "down") {
+  const client = await db();
+  const item: Record<string, string> | null = check(await client.from(table).select(parentColumn).eq("id", id).maybeSingle());
   if (!item) return;
-  const siblings = all<{ id: string }>(`SELECT id FROM ${table} WHERE ${parentColumn} = ? ORDER BY sort_order, created_at`, item.parent);
+  const siblings: { id: string }[] = check(await client.from(table).select("id").eq(parentColumn, item[parentColumn]).order("sort_order").order("created_at"));
   const index = siblings.findIndex((sibling) => sibling.id === id);
   const target = direction === "up" ? index - 1 : index + 1;
   if (index < 0 || target < 0 || target >= siblings.length) return;
   [siblings[index], siblings[target]] = [siblings[target], siblings[index]];
-  transaction(db(), () => {
-    siblings.forEach((sibling, order) => run(`UPDATE ${table} SET sort_order = ? WHERE id = ?`, order, sibling.id));
-  });
+  await Promise.all(siblings.map(async (sibling, order) => check(await client.from(table).update({ sort_order: order }).eq("id", sibling.id))));
 }
-export function moveTopic(id: string, direction: "up" | "down") {
-  move("topics", "course_id", id, direction);
+export async function moveTopic(id: string, direction: "up" | "down") {
+  await move("topics", "course_id", id, direction);
 }
 
 /* ---------- Episoder ---------- */
@@ -265,35 +204,41 @@ export type EpisodeInput = {
   duration_seconds: number;
 };
 
-export function createEpisode(input: EpisodeInput) {
-  const id = randomUUID();
-  const next = one<{ next: number }>("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM episodes WHERE topic_id = ?", input.topic_id)!.next;
-  run(`INSERT INTO episodes (id, topic_id, course_id, title, description, study_notes, media_type, media_url, embed_url, duration_seconds, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  id, input.topic_id, input.course_id, input.title, input.description, input.study_notes, input.media_type, input.media_url, input.embed_url, input.duration_seconds, next);
-  return getEpisode(id)!;
+export async function createEpisode(input: EpisodeInput) {
+  const client = await db();
+  const row = { id: randomUUID(), ...input, sort_order: await nextSortOrder("episodes", "topic_id", input.topic_id) };
+  return check(await client.from("episodes").insert(row).select("*").single()) as Episode;
 }
-export function getEpisode(id: string) {
-  return one<Episode>("SELECT * FROM episodes WHERE id = ?", id);
+export async function getEpisode(id: string): Promise<Episode | null> {
+  const client = await db();
+  return check(await client.from("episodes").select("*").eq("id", id).maybeSingle());
 }
-export function updateEpisode(id: string, input: Partial<Pick<Episode, "title" | "description" | "study_notes" | "topic_id">>) {
-  if (input.topic_id !== undefined) {
-    const current = getEpisode(id);
-    if (current && current.topic_id !== input.topic_id) {
-      const next = one<{ next: number }>("SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM episodes WHERE topic_id = ?", input.topic_id)!.next;
-      run("UPDATE episodes SET topic_id = ?, sort_order = ? WHERE id = ?", input.topic_id, next, id);
+export async function updateEpisode(id: string, input: Partial<Pick<Episode, "title" | "description" | "study_notes" | "topic_id">>) {
+  const client = await db();
+  const { topic_id: topicId, ...rest } = input;
+  const fields: Record<string, unknown> = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
+  if (topicId !== undefined) {
+    const current = await getEpisode(id);
+    if (current && current.topic_id !== topicId) {
+      fields.topic_id = topicId;
+      fields.sort_order = await nextSortOrder("episodes", "topic_id", topicId);
     }
   }
-  for (const key of ["title", "description", "study_notes"] as const) {
-    if (input[key] !== undefined) run(`UPDATE episodes SET ${key} = ? WHERE id = ?`, input[key]!, id);
-  }
-  return getEpisode(id)!;
+  if (Object.keys(fields).length) check(await client.from("episodes").update(fields).eq("id", id));
+  return (await getEpisode(id))!;
 }
-export function moveEpisode(id: string, direction: "up" | "down") {
-  move("episodes", "topic_id", id, direction);
+export async function moveEpisode(id: string, direction: "up" | "down") {
+  await move("episodes", "topic_id", id, direction);
 }
-export function deleteEpisode(id: string) {
-  const episode = getEpisode(id);
-  run("DELETE FROM episodes WHERE id = ?", id);
+export async function deleteEpisode(id: string) {
+  const client = await db();
+  const episode = await getEpisode(id);
+  check(await client.from("episodes").delete().eq("id", id));
   return episode?.media_url ?? "";
+}
+
+/** Enkel spørring som holder Supabase-prosjektet aktivt (brukes av den daglige cron-jobben). */
+export async function ping() {
+  const client = await db();
+  check(await client.from("courses").select("id").limit(1));
 }

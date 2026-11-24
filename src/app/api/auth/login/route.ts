@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     const body = await readJson(request);
     const email = text(body.email, 160).toLowerCase();
     const password = typeof body.password === "string" ? body.password.slice(0, 200) : "";
-    const found = email ? findTeacherByEmail(email) : null;
+    const found = email ? await findTeacherByEmail(email) : null;
     if (!found || !verifyPassword(password, found.password_hash)) {
       throw new HttpError(401, "Feil e-post eller passord.");
     }
