@@ -18,7 +18,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/next.config.ts ./
-RUN mkdir -p /data && chown node:node /data
-USER node
+# Kjører som root fordi Railway og flere andre monterer volumet med root som eier.
+RUN mkdir -p /data
 EXPOSE 3000
 CMD ["sh", "-c", "exec node node_modules/next/dist/bin/next start -H 0.0.0.0 -p ${PORT:-3000}"]
