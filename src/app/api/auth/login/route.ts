@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handle, HttpError, readJson, setSessionCookie, text } from "@/lib/auth";
+import { clientIp, handle, HttpError, limitAttempts, readJson, setSessionCookie, text } from "@/lib/auth";
 import { findTeacherByEmail } from "@/lib/db";
 import { verifyPassword } from "@/lib/password";
 
@@ -8,6 +8,8 @@ export async function POST(request: Request) {
     const body = await readJson(request);
     const email = text(body.email, 160).toLowerCase();
     const password = typeof body.password === "string" ? body.password.slice(0, 200) : "";
+    limitAttempts(`login-ip:${clientIp(request)}`, 30, 15 * 60_000);
+    limitAttempts(`login:${email}`, 10, 15 * 60_000);
     const found = email ? await findTeacherByEmail(email) : null;
     if (!found || !verifyPassword(password, found.password_hash)) {
       throw new HttpError(401, "Feil e-post eller passord.");

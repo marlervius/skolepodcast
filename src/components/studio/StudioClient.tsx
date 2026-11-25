@@ -20,7 +20,7 @@ type DialogState =
 
 const SELECTED_KEY = "lytterom_studio_course_v1";
 
-export function StudioClient() {
+export function StudioClient({ maxUploadMb }: { maxUploadMb: number }) {
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export function StudioClient() {
     return <div className="studio-loading"><LoaderCircle className="studio-spinner" size={26} /> Laster studio …</div>;
   }
   if (!teacher) return <AuthScreen onAuthenticated={setTeacher} />;
-  return <Studio teacher={teacher} onLogout={() => setTeacher(null)} />;
+  return <Studio teacher={teacher} maxUploadMb={maxUploadMb} onLogout={() => setTeacher(null)} />;
 }
 
 /* ---------- Innlogging og registrering ---------- */
@@ -108,7 +108,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) =
 
 /* ---------- Selve studioet ---------- */
 
-function Studio({ teacher, onLogout }: { teacher: Teacher; onLogout: () => void }) {
+function Studio({ teacher, maxUploadMb, onLogout }: { teacher: Teacher; maxUploadMb: number; onLogout: () => void }) {
   const [courses, setCourses] = useState<CourseSummary[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [course, setCourse] = useState<Course | null>(null);
@@ -311,7 +311,7 @@ function Studio({ teacher, onLogout }: { teacher: Teacher; onLogout: () => void 
 
       {dialog?.kind === "course" && <CourseDialog course={dialog.course} close={close} saved={saved} />}
       {dialog?.kind === "topic" && course && <TopicDialog course={course} topic={dialog.topic} close={close} saved={saved} />}
-      {dialog?.kind === "episode" && course && <EpisodeDialog course={course} topic={dialog.topic} episode={dialog.episode} close={close} saved={saved} />}
+      {dialog?.kind === "episode" && course && <EpisodeDialog course={course} topic={dialog.topic} episode={dialog.episode} maxUploadMb={maxUploadMb} close={close} saved={saved} />}
       {dialog?.kind === "share" && course && <ShareDialog course={course} close={close} />}
       {dialog?.kind === "preview" && <PreviewDialog episode={dialog.episode} close={close} />}
       {dialog?.kind === "delete" && <DeleteDialog title={dialog.title} detail={dialog.detail} kind={dialog.target} endpoint={dialog.endpoint} close={close} saved={saved} />}

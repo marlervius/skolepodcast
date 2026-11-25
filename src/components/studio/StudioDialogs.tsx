@@ -6,8 +6,8 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import type { Course, Episode, Topic } from "@/lib/types";
-import { messageFrom, studioJson, studioRequest, uploadEpisode } from "./api";
+import { COURSE_COLORS, DEFAULT_COLOR, type Course, type Episode, type Topic } from "@/lib/types";
+import { durationLabel, messageFrom, studioJson, studioRequest, uploadMedia } from "./api";
 
 type DialogProps = {
   close: () => void;
@@ -110,14 +110,9 @@ function useSave() {
   return { busy, error, run };
 }
 
-const courseColors = [
-  ["Terrakotta", "#C0563B"], ["Skoggrønn", "#2E6A4F"], ["Fjordblå", "#2B5B84"],
-  ["Varm oker", "#B5791E"], ["Plomme", "#7D3E5E"], ["Skifer", "#4A5A6A"],
-];
-
 export function CourseDialog({ course, close, saved }: DialogProps & { course?: Course }) {
   const { busy, error, run } = useSave();
-  const [color, setColor] = useState(course?.accent_color || courseColors[0][1]);
+  const [color, setColor] = useState<string>(course?.accent_color || DEFAULT_COLOR);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -148,7 +143,7 @@ export function CourseDialog({ course, close, saved }: DialogProps & { course?: 
         <fieldset className="studio-colors">
           <legend>Fagfarge</legend>
           <div>
-            {courseColors.map(([name, value]) => {
+            {COURSE_COLORS.map(({ name, value }) => {
               const selected = color.toLowerCase() === value.toLowerCase();
               return (
                 <label key={value} title={name} style={{ backgroundColor: value }}>
@@ -223,10 +218,18 @@ function readDuration(file: File) {
   });
 }
 
+const currentMedia = {
+  audio: { icon: FileAudio, label: "Lydfil" },
+  video: { icon: FileVideo, label: "Videofil" },
+  embed: { icon: Link2, label: "YouTube- eller Vimeo-video" },
+} as const;
+
 export function EpisodeDialog({
-  course, topic, episode, close, saved,
-}: DialogProps & { course: Course; topic: Topic; episode?: Episode }) {
+  course, topic, episode, maxUploadMb, close, saved,
+}: DialogProps & { course: Course; topic: Topic; episode?: Episode; maxUploadMb: number }) {
   const { busy, error, run } = useSave();
+  const [replacing, setReplacing] = useState(false);
+  const showMedia = !episode || replacing;
   const [mode, setMode] = useState<"file" | "link">("file");
   const [file, setFile] = useState<File>();
   const [fileError, setFileError] = useState("");
@@ -243,6 +246,10 @@ export function EpisodeDialog({
       setFileError("Velg en lyd- eller videofil i et av formatene som er oppgitt.");
       return;
     }
+    if (selection.size > maxUploadMb * 1024 * 1024) {
+      setFileError(`Filen er for stor. Maks størrelse er ${maxUploadMb} MB. Lengre videoer kan legges på YouTube og lenkes inn.`);
+      return;
+    }
     setFile(selection);
     const filename = selection.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim().slice(0, 140);
     if (!title.trim() || title === lastFileTitle) setTitle(filename);
@@ -253,23 +260,24 @@ export function EpisodeDialog({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
-    if (!episode && mode === "file" && !file) {
+    const uploading = showMedia && mode === "file";
+    if (uploading && !file) {
       setFileError("Velg en fil for å fortsette.");
       return;
     }
 
     void run(async () => {
       try {
-        if (episode) {
-          await studioRequest(`/api/episodes/${episode.id}`, studioJson("PATCH", values));
-        } else if (mode === "link") {
-          await studioRequest("/api/episodes", studioJson("POST", {
-            ...values, course_id: course.id, topic_id: topic.id,
-          }));
-        } else if (file) {
-          const fields = { ...values, course_id: course.id, topic_id: topic.id, duration_seconds: await duration.current };
+        let fields: Record<string, unknown> = values;
+        if (uploading && file) {
           setProgress(0);
-          await uploadEpisode(file, fields, setProgress);
+          const uploadPath = await uploadMedia(file, course.id, setProgress);
+          fields = { ...values, upload_path: uploadPath, duration_seconds: await duration.current };
+        }
+        if (episode) {
+          await studioRequest(`/api/episodes/${episode.id}`, studioJson("PATCH", fields));
+        } else {
+          await studioRequest("/api/episodes", studioJson("POST", { ...fields, course_id: course.id, topic_id: topic.id }));
         }
         await saved(episode ? "Episoden er oppdatert." : "Episoden er publisert.");
       } finally {
@@ -278,59 +286,69 @@ export function EpisodeDialog({
     });
   }
 
+  function toggleReplace() {
+    setReplacing((value) => !value);
+    setFile(undefined);
+    setFileError("");
+    duration.current = Promise.resolve(0);
+  }
+
   const FileIcon = file && videoExtensions.test(file.name) ? FileVideo : FileAudio;
+  const current = episode ? currentMedia[episode.media_type] : null;
+
+  const mediaFields = showMedia && (
+    <>
+      <div className="studio-mode-switch" role="group" aria-label="Mediekilde">
+        <button type="button" aria-pressed={mode === "file"} disabled={busy} onClick={() => setMode("file")}><UploadCloud size={16} /> Last opp fil</button>
+        <button type="button" aria-pressed={mode === "link"} disabled={busy} onClick={() => setMode("link")}><Link2 size={16} /> YouTube / Vimeo</button>
+      </div>
+      {mode === "file" ? (
+        <div
+          className={`studio-dropzone${dragging ? " studio-dropzone--active" : ""}`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            if (!busy) setDragging(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragging(false);
+            const selected = event.dataTransfer.files[0];
+            if (selected && !busy) chooseFile(selected);
+          }}
+        >
+          <input
+            hidden
+            type="file"
+            accept={acceptedFiles}
+            ref={filePicker}
+            disabled={busy}
+            onChange={(event) => {
+              const selected = event.currentTarget.files?.[0];
+              if (selected) chooseFile(selected);
+              event.currentTarget.value = "";
+            }}
+          />
+          {file ? <FileIcon size={27} /> : <UploadCloud size={27} />}
+          <strong>{file ? file.name : "Dra en lyd- eller videofil hit"}</strong>
+          <button type="button" className="studio-button" disabled={busy} onClick={() => filePicker.current?.click()}>
+            {file ? "Velg en annen fil" : "Velg fil"}
+          </button>
+          <small>MP3, M4A, WAV, OGG, AAC, FLAC, MP4, WEBM og MOV, maks {maxUploadMb} MB. Lengre videoer kan legges på YouTube.</small>
+          {fileError && <p className="studio-error" role="alert">{fileError}</p>}
+        </div>
+      ) : (
+        <label>Videolenke<input name="embed_url" type="url" placeholder="https://www.youtube.com/watch?v=…" required /></label>
+      )}
+    </>
+  );
 
   return (
     <Dialog title={episode ? "Rediger episode" : "Ny episode"} busy={busy} close={close}>
       <form className="studio-form" onSubmit={submit}>
-        {!episode && (
-          <>
-            <div className="studio-mode-switch" role="group" aria-label="Mediekilde">
-              <button type="button" aria-pressed={mode === "file"} disabled={busy} onClick={() => setMode("file")}><UploadCloud size={16} /> Last opp fil</button>
-              <button type="button" aria-pressed={mode === "link"} disabled={busy} onClick={() => setMode("link")}><Link2 size={16} /> YouTube / Vimeo</button>
-            </div>
-            {mode === "file" ? (
-              <div
-                className={`studio-dropzone${dragging ? " studio-dropzone--active" : ""}`}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  if (!busy) setDragging(true);
-                }}
-                onDragLeave={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragging(false);
-                  const selected = event.dataTransfer.files[0];
-                  if (selected && !busy) chooseFile(selected);
-                }}
-              >
-                <input
-                  hidden
-                  type="file"
-                  accept={acceptedFiles}
-                  ref={filePicker}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const selected = event.currentTarget.files?.[0];
-                    if (selected) chooseFile(selected);
-                    event.currentTarget.value = "";
-                  }}
-                />
-                {file ? <FileIcon size={27} /> : <UploadCloud size={27} />}
-                <strong>{file ? file.name : "Dra en lyd- eller videofil hit"}</strong>
-                <button type="button" className="studio-button" disabled={busy} onClick={() => filePicker.current?.click()}>
-                  {file ? "Velg en annen fil" : "Velg fil"}
-                </button>
-                <small>MP3, M4A, WAV, OGG, AAC, FLAC, MP4, WEBM og MOV, maks 50 MB. Lengre videoer kan legges på YouTube.</small>
-                {fileError && <p className="studio-error" role="alert">{fileError}</p>}
-              </div>
-            ) : (
-              <label>Videolenke<input name="embed_url" type="url" placeholder="https://www.youtube.com/watch?v=…" required /></label>
-            )}
-          </>
-        )}
+        {!episode && mediaFields}
         <label>Tittel<input name="title" value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={140} /></label>
         {episode && (
           <label>
@@ -342,9 +360,28 @@ export function EpisodeDialog({
         )}
         <label>Beskrivelse<textarea name="description" rows={3} defaultValue={episode?.description} maxLength={1600} /></label>
         <label>Nøkkelpunkter og refleksjonsspørsmål<textarea name="study_notes" rows={4} defaultValue={episode?.study_notes} maxLength={8000} /></label>
+        {episode && current && (
+          <section className="studio-replace" aria-label="Lyd eller video">
+            <div className="studio-replace-current">
+              <current.icon size={18} aria-hidden />
+              <span><small>Nå</small>{current.label}{episode.duration_seconds > 0 && ` · ${durationLabel(episode.duration_seconds)}`}</span>
+              <button type="button" className="studio-button" aria-expanded={replacing} disabled={busy} onClick={toggleReplace}>
+                {replacing ? "Behold nåværende" : "Bytt fil eller lenke"}
+              </button>
+            </div>
+            {replacing && (
+              <>
+                {mediaFields}
+                <p className="studio-muted">
+                  Elevene beholder fremdriften sin i episoden.{episode.media_type !== "embed" && " Den gamle filen slettes når du lagrer."}
+                </p>
+              </>
+            )}
+          </section>
+        )}
         {progress !== null && (
           <div className="studio-upload-progress" role="status">
-            <span>{progress === 100 ? "Lagrer episoden" : "Laster opp"}</span>
+            <span>{progress === 100 ? (episode ? "Lagrer endringene" : "Lagrer episoden") : "Laster opp"}</span>
             <span>{progress} %</span>
             <progress value={progress} max={100} aria-label="Opplasting" />
           </div>
@@ -383,7 +420,7 @@ export function ShareDialog({ course, close }: { course: Course; close: () => vo
           <p>Be elevene skanne koden med mobilkameraet eller skrive inn klassekoden i Lytterom.</p>
         </div>
         <div className="studio-qr">
-          {link && <Image unoptimized src={`/api/qr?url=${encodeURIComponent(link)}`} width={256} height={256} alt={`QR-kode til ${course.title}`} />}
+          {link && <Image unoptimized src={`/api/qr?code=${encodeURIComponent(course.code)}`} width={256} height={256} alt={`QR-kode til ${course.title}`} />}
         </div>
         <div className="studio-share-code"><span>Klassekode</span><strong>{course.code}</strong></div>
         <label className="studio-share-link">Elevlenke<input ref={linkField} readOnly value={link} onFocus={(event) => event.currentTarget.select()} /></label>

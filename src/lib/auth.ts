@@ -60,8 +60,42 @@ export function setSessionCookie(response: NextResponse, teacherId: string) {
 }
 
 export function clearSessionCookie(response: NextResponse) {
-  response.cookies.set(SESSION_COOKIE, "", { httpOnly: true, sameSite: "lax", path: "/", maxAge: 0 });
+  response.cookies.set(SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
   return response;
+}
+
+/* ---------- Begrensning av innloggingsforsøk ---------- */
+
+const attempts = new Map<string, { count: number; reset: number }>();
+
+/** Klientens IP-adresse slik Vercel oppgir den. */
+export function clientIp(request: Request) {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "ukjent";
+}
+
+/**
+ * Stopper gjentatte forsøk (f.eks. passordgjetting) fra samme nøkkel.
+ * Telleren ligger i minnet til serverinstansen, så den er en bremse og ikke en garanti på Vercel.
+ */
+export function limitAttempts(key: string, max: number, windowMs: number) {
+  const now = Date.now();
+  if (attempts.size > 5000) for (const [k, v] of attempts) if (v.reset <= now) attempts.delete(k);
+  const entry = attempts.get(key);
+  if (!entry || entry.reset <= now) {
+    attempts.set(key, { count: 1, reset: now + windowMs });
+    return;
+  }
+  entry.count++;
+  if (entry.count > max) {
+    const minutes = Math.ceil((entry.reset - now) / 60_000);
+    throw new HttpError(429, `For mange forsøk. Vent ${minutes} ${minutes === 1 ? "minutt" : "minutter"} og prøv igjen.`);
+  }
 }
 
 /* ---------- Felles hjelpere for API-rutene ---------- */

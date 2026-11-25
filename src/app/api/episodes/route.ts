@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handle, HttpError, readJson, requireCourseOwner, text } from "@/lib/auth";
+import { currentTeacher, handle, HttpError, readJson, requireCourseOwner, text } from "@/lib/auth";
 import { createEpisode, getTopic } from "@/lib/db";
 import { confirmUpload, discardUpload } from "@/lib/storage";
 import { parseEmbedUrl } from "@/lib/types";
@@ -33,7 +33,9 @@ export async function POST(request: Request) {
     try {
       teacher = await checkTarget(courseId, topicId);
     } catch (error) {
-      if (uploadPath) await discardUpload(uploadPath).catch(() => undefined);
+      // Rydd bort filen bare hvis den ligger i den innloggede lærerens egen mappe.
+      const owner = uploadPath ? await currentTeacher().catch(() => null) : null;
+      if (owner) await discardUpload(owner.id, uploadPath).catch(() => undefined);
       throw error;
     }
     const info = details(body);
@@ -45,7 +47,7 @@ export async function POST(request: Request) {
         const episode = await createEpisode({ ...info, ...saved, course_id: courseId, topic_id: topicId, embed_url: "", duration_seconds: duration });
         return NextResponse.json({ episode }, { status: 201 });
       } catch (error) {
-        await discardUpload(uploadPath).catch(() => undefined);
+        await discardUpload(teacher.id, uploadPath).catch(() => undefined);
         throw error;
       }
     }

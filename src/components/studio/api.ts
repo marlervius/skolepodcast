@@ -22,12 +22,13 @@ export function studioJson(method: "POST" | "PATCH", data: object): RequestInit 
 type UploadTicket = { upload_url: string; upload_path: string; content_type: string };
 
 /**
- * Laster opp en fil direkte til Supabase Storage og lager episoden etterpå.
+ * Laster opp en fil direkte til Supabase Storage og returnerer stien den fikk.
  * Serveren gir en tidsbegrenset opplastingslenke, så filen aldri går gjennom Vercel.
+ * Stien sendes etterpå til /api/episodes (ny episode) eller /api/episodes/[id] (bytt fil).
  */
-export async function uploadEpisode(file: File, fields: Record<string, unknown>, onProgress: (percent: number) => void) {
+export async function uploadMedia(file: File, courseId: string, onProgress: (percent: number) => void) {
   const ticket = await studioRequest<UploadTicket>("/api/uploads", studioJson("POST", {
-    course_id: fields.course_id, filename: file.name, size: file.size,
+    course_id: courseId, filename: file.name, size: file.size,
   }));
   await new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest();
@@ -47,7 +48,7 @@ export async function uploadEpisode(file: File, fields: Record<string, unknown>,
     request.onabort = () => reject(new Error("Opplastingen ble avbrutt."));
     request.send(file);
   });
-  await studioRequest("/api/episodes", studioJson("POST", { ...fields, upload_path: ticket.upload_path }));
+  return ticket.upload_path;
 }
 
 export function messageFrom(error: unknown) {

@@ -11,18 +11,13 @@
 }
 .mediaContainer video { width: 100%; height: 100%; background: #000; }
 
-/* Når video vises i fullskjermspilleren legges elementet oppå plassholderen i arket. */
+/* Når video vises i fullskjermspilleren legges elementet oppå plassholderen i arket.
+   Posisjon og størrelse settes fra PlayerContext, så videoen følger med når arket scrolles. */
 .mediaContainer[data-expanded="true"][data-video="true"] {
   z-index: 61;
   opacity: 1;
   pointer-events: auto;
-  width: min(520px, calc(100vw - 40px));
-  height: auto;
-  aspect-ratio: 16 / 9;
-  left: 50%;
   bottom: auto;
-  top: calc(env(safe-area-inset-top) + 86px); /* arkets toppmarg + topplinje + mellomrom */
-  transform: translateX(-50%);
   border-radius: 14px;
 }
 
@@ -111,7 +106,7 @@
 .timeline input { width: 100%; accent-color: var(--ink); height: 28px; cursor: pointer; }
 .timeline div { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-.controls { display: flex; align-items: center; justify-content: center; gap: 34px; }
+.controls { display: flex; align-items: center; justify-content: center; gap: clamp(4px, 2.4vw, 22px); }
 .controls > button {
   position: relative;
   width: 56px;
@@ -129,6 +124,24 @@
 .controls > .bigPlay { width: 78px; height: 78px; background: var(--ink); color: var(--bg); }
 .controls > .bigPlay:hover { background: var(--ink); transform: scale(1.04); }
 .controls > .bigPlay svg { width: 30px; height: 30px; }
+/* Forrige/neste episode: litt mindre enn spoleknappene, så avspillingsknappen fortsatt dominerer. */
+.controls > .track { width: 48px; height: 48px; }
+.controls > .track svg { width: 24px; height: 24px; }
+.controls > button:disabled { opacity: .3; cursor: default; background: none; }
+@media (max-width: 360px) {
+  .controls > button { width: 46px; height: 46px; }
+  .controls > .track { width: 40px; height: 40px; }
+  .controls > .bigPlay { width: 68px; height: 68px; }
+}
+.upNext {
+  margin: -10px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .settings { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .settings label {
@@ -167,6 +180,10 @@
   font-weight: 600;
 }
 .complete:hover { background: var(--surface-2); }
+
+.notes { padding: 16px 18px; border-radius: 14px; background: var(--surface-2); }
+.notes h3 { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.notes p { margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
 
 .error { margin: 0; padding: 12px 14px; border-radius: 12px; background: var(--danger-soft); color: var(--danger); font-size: 14px; }
 

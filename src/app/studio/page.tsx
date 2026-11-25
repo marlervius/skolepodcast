@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { StudioClient } from "@/components/studio/StudioClient";
+import { MAX_UPLOAD_MB } from "@/lib/limits";
 import "./studio.css";
 
 export const metadata: Metadata = {
@@ -8,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function StudioPage() {
-  return <StudioClient />;
+  return <StudioClient maxUploadMb={MAX_UPLOAD_MB} />;
 }

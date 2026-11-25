@@ -375,3 +375,15 @@ time, .tabular { font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ============ Tekstsider (personvern) ============ */
+.prose { max-width: 62ch; padding-bottom: 64px; }
+.prose h1 { margin: 0; font-family: var(--serif); font-size: clamp(32px, 8vw, 46px); font-weight: 600; line-height: 1.05; letter-spacing: -.02em; }
+.prose h2 { margin: 36px 0 10px; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+.prose p, .prose li { font-size: 16px; line-height: 1.6; }
+.prose p { margin: 0 0 12px; }
+.prose ul { margin: 0 0 12px; padding-left: 20px; }
+.prose li { margin-bottom: 6px; }
+.prose a { color: var(--accent); font-weight: 600; }
+.prose-lead { margin-top: 14px !important; font-family: var(--serif); font-size: 19px !important; }
+.prose-meta { font-size: 13px !important; color: var(--muted); }

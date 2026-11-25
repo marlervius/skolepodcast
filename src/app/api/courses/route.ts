@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { handle, HttpError, readJson, requireTeacher, text } from "@/lib/auth";
-import { createCourse, getCourseSummariesByCodes, getCourseSummaryByCode, isCodeTaken, listTeacherCourses } from "@/lib/db";
+import { createCourse, getCourseByCode, getCourseSummariesByCodes, getCourseSummaryByCode, isCodeTaken, listTeacherCourses } from "@/lib/db";
 import { DEFAULT_COLOR, isCourseColor, normalizeCode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,8 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     if (params.has("code")) {
       const code = normalizeCode(params.get("code"));
-      const course = code ? await getCourseSummaryByCode(code) : null;
+      // full=1 tar med kapitler og episoder (samme innhold som elevsiden /fag/KODE viser).
+      const course = !code ? null : params.get("full") === "1" ? await getCourseByCode(code) : await getCourseSummaryByCode(code);
       if (!course) throw new HttpError(404, "Fant ikke noe fagrom med denne klassekoden.");
       return NextResponse.json({ course });
     }

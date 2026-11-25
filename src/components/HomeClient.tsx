@@ -5,10 +5,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ArrowRight, ChevronRight, Headphones, LoaderCircle, Pause, Play, QrCode, Smartphone, X } from "lucide-react";
 import { usePlayer } from "@/context/PlayerContext";
 import { follow, readFollowed, unfollow } from "@/lib/followed";
-import { normalizeCode, type CourseSummary } from "@/lib/types";
+import { normalizeCode, type Course, type CourseSummary } from "@/lib/types";
 
 export function HomeClient() {
-  const { lastPlayed, progress, playEpisode, currentEpisode, isPlaying } = usePlayer();
+  const { lastPlayed, progress, playEpisode, currentEpisode, isPlaying, syncCourse } = usePlayer();
   const [codes, setCodes] = useState<string[] | null>(null);
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +30,20 @@ export function HomeClient() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [codes]);
+
+  // Kortet «Fortsett der du slapp» vises bare for fag eleven fortsatt følger, og oppdateres med ferske data.
+  const lastCourseId = lastPlayed?.course.id;
+  const lastCode = lastPlayed ? normalizeCode(lastPlayed.course.code) : "";
+  const lastFollowed = !!lastCode && !!codes?.includes(lastCode);
+  useEffect(() => {
+    if (!lastCourseId || !lastFollowed) return;
+    let active = true;
+    fetch(`/api/courses?code=${encodeURIComponent(lastCode)}&full=1`, { cache: "no-store" })
+      .then((response) => response.status === 404 ? { course: null } : response.ok ? response.json() : Promise.reject())
+      .then((data: { course: Course | null }) => { if (active) syncCourse(lastCourseId, data.course); })
+      .catch(() => { /* Uten nett beholdes kortet som det er. */ });
+    return () => { active = false; };
+  }, [lastCourseId, lastCode, lastFollowed, syncCourse]);
 
   function add(event: FormEvent) {
     event.preventDefault();
@@ -59,7 +73,7 @@ export function HomeClient() {
     setCodes(unfollow(courseCode));
   }
 
-  const last = lastPlayed;
+  const last = lastFollowed ? lastPlayed : null;
   const lastProgress = last ? progress[last.episode.id] : undefined;
   const lastFraction = last && last.episode.duration_seconds && lastProgress ? Math.min(1, lastProgress.position / last.episode.duration_seconds) : 0;
   const lastIsPlaying = last && currentEpisode?.id === last.episode.id && isPlaying;
@@ -152,6 +166,7 @@ export function HomeClient() {
       <footer className="home-foot">
         <p>Lytterom lagrer ingenting om deg. Fagene og fremgangen din ligger bare på denne enheten.</p>
         <Link href="/studio">Er du lærer? Gå til lærerstudio →</Link>
+        <Link href="/personvern">Personvern</Link>
       </footer>
     </div>
   );

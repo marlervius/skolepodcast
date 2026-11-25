@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { handle, HttpError, readJson, setSessionCookie, text } from "@/lib/auth";
+import { clientIp, handle, HttpError, limitAttempts, readJson, setSessionCookie, text } from "@/lib/auth";
 import { createTeacher, findTeacherByEmail } from "@/lib/db";
 import { hashPassword } from "@/lib/password";
 
@@ -11,6 +11,7 @@ export async function POST(request: Request) {
     const email = text(body.email, 160).toLowerCase();
     const password = typeof body.password === "string" ? body.password : "";
     const invite = typeof body.invite === "string" ? body.invite.trim() : "";
+    limitAttempts(`register:${clientIp(request)}`, 10, 15 * 60_000);
     if (!registrationAllowed(invite)) throw new HttpError(403, "Feil invitasjonskode.");
     if (name.length < 2) throw new HttpError(400, "Skriv inn navnet ditt.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, "Skriv inn en gyldig e-postadresse.");

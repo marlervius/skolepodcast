@@ -1,9 +1,13 @@
 import QRCode from "qrcode";
+import { normalizeCode } from "@/lib/types";
 
+/** QR-kode til elevlenken for et fagrom. Lenken bygges her, så ruten kan ikke brukes til å lage koder til andre sider. */
 export async function GET(request: Request) {
-  const value = new URL(request.url).searchParams.get("url") || "";
-  if (!value || value.length > 1000) return new Response("Mangler gyldig url", { status: 400 });
-  const svg = await QRCode.toString(value, {
+  const url = new URL(request.url);
+  const code = normalizeCode(url.searchParams.get("code"));
+  if (!code) return new Response("Mangler klassekode", { status: 400 });
+  const link = new URL(`/fag/${encodeURIComponent(code)}`, url.origin).href;
+  const svg = await QRCode.toString(link, {
     type: "svg",
     margin: 1,
     errorCorrectionLevel: "M",

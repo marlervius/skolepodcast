@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "./auth";
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from "./limits";
 import { check, MEDIA_BUCKET, publicMediaPrefix, supabase } from "./supabase";
 import type { MediaType } from "./types";
 
@@ -9,8 +10,7 @@ import type { MediaType } from "./types";
  * Elevene strømmer filene fra bucketens offentlige adresse, som støtter spoling (Range).
  */
 
-// Supabase sin gratisplan godtar filer opptil 50 MB. Kan økes på betalt plan.
-export const MAX_UPLOAD_BYTES = Number(process.env.LYTTEROM_MAX_UPLOAD_MB || 50) * 1024 * 1024;
+export { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB };
 
 export const MEDIA_TYPES: Record<string, { mime: string; kind: Exclude<MediaType, "embed"> }> = {
   ".mp3": { mime: "audio/mpeg", kind: "audio" },
@@ -38,7 +38,7 @@ export async function createUpload(teacherId: string, filename: string, size: nu
   if (!type) throw new HttpError(415, "Filtypen støttes ikke. Bruk MP3, M4A, WAV, OGG, AAC, FLAC, MP4, WEBM eller MOV.");
   if (!(size > 0)) throw new HttpError(400, "Filen er tom.");
   if (size > MAX_UPLOAD_BYTES) {
-    throw new HttpError(413, `Filen er for stor. Maks størrelse er ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB. Lengre videoer kan legges på YouTube og lenkes inn.`);
+    throw new HttpError(413, `Filen er for stor. Maks størrelse er ${MAX_UPLOAD_MB} MB. Lengre videoer kan legges på YouTube og lenkes inn.`);
   }
   const path = `${teacherId}/${randomUUID()}${extension}`;
   const signed = check(await supabase().storage.from(MEDIA_BUCKET).createSignedUploadUrl(path));
@@ -71,8 +71,9 @@ export async function deleteMediaFiles(urls: string[]) {
   if (error) console.error("Kunne ikke slette mediefiler:", error.message);
 }
 
-/** Sletter en fil som ble lastet opp, men aldri knyttet til en episode. */
-export async function discardUpload(path: string) {
-  if (!UPLOAD_PATH.test(path)) return;
+/** Sletter en fil læreren lastet opp, men som aldri ble knyttet til en episode. Rører bare lærerens egen mappe. */
+export async function discardUpload(teacherId: string, path: string) {
+  const match = path.match(UPLOAD_PATH);
+  if (!match || match[1] !== teacherId) return;
   await supabase().storage.from(MEDIA_BUCKET).remove([path]);
 }

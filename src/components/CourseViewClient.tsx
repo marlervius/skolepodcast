@@ -16,13 +16,15 @@ const filters: { id: Filter; label: string }[] = [
 ];
 
 export function CourseViewClient({ course }: { course: Course }) {
-  const { playEpisode, currentEpisode, isPlaying, progress, toggleCompleted } = usePlayer();
+  const { playEpisode, currentEpisode, isPlaying, progress, toggleCompleted, syncCourse } = usePlayer();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [open, setOpen] = useState<string | null>(null);
 
   // Eleven som åpner en delt lenke eller QR-kode får faget automatisk i Mine fag.
   useEffect(() => { ensureFollowed(course.code); }, [course.code]);
+  // Holder «Fortsett der du slapp» i takt med det læreren har endret eller slettet.
+  useEffect(() => { syncCourse(course.id, course); }, [course, syncCourse]);
 
   const allEpisodes = useMemo(() => course.topics.flatMap((topic) => topic.episodes), [course]);
   const completed = allEpisodes.filter((episode) => progress[episode.id]?.completed).length;

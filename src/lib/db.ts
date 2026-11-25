@@ -213,7 +213,10 @@ export async function getEpisode(id: string): Promise<Episode | null> {
   const client = await db();
   return check(await client.from("episodes").select("*").eq("id", id).maybeSingle());
 }
-export async function updateEpisode(id: string, input: Partial<Pick<Episode, "title" | "description" | "study_notes" | "topic_id">>) {
+export type EpisodeUpdate = Partial<Pick<Episode,
+  "title" | "description" | "study_notes" | "topic_id" | "media_type" | "media_url" | "embed_url" | "duration_seconds">>;
+
+export async function updateEpisode(id: string, input: EpisodeUpdate) {
   const client = await db();
   const { topic_id: topicId, ...rest } = input;
   const fields: Record<string, unknown> = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
