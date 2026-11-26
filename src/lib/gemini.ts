@@ -28,6 +28,19 @@ export function geminiClient(apiVersion?: "v1" | "v1beta"): GoogleGenAI {
     : new GoogleGenAI({ apiKey });
 }
 
+export function isTransientGeminiError(error: unknown): boolean {
+  const raw = error instanceof Error ? error.message : String(error);
+  const status = typeof error === "object" && error !== null && "status" in error
+    ? Number((error as { status?: unknown }).status)
+    : 0;
+  return (
+    status === 503 ||
+    status === 500 ||
+    status === 504 ||
+    /\b503\b|UNAVAILABLE|high demand|overloaded|temporarily unavailable/i.test(raw)
+  );
+}
+
 /** Oversetter typiske feil fra Gemini API til forståelige norske feilmeldinger. */
 export function mapGeminiError(error: unknown): never {
   if (error instanceof HttpError) throw error;
@@ -37,8 +50,14 @@ export function mapGeminiError(error: unknown): never {
   if (/API[_ ]?KEY|UNAUTHENTICATED|401|403|PERMISSION_DENIED/i.test(raw)) {
     throw new HttpError(502, "Gemini API-nøkkelen ble avvist. Sjekk at GEMINI_API_KEY er gyldig i Google AI Studio.");
   }
+  if (/\b402\b|prepayment|credits are depleted|billing/i.test(raw)) {
+    throw new HttpError(402, "Google AI Studio-kontoen mangler kreditt/fakturering for dette kallet. Sjekk prosjektet på ai.studio/projects.");
+  }
   if (/429|RESOURCE_EXHAUSTED|quota|rate limit/i.test(raw)) {
     throw new HttpError(429, "Gemini API-kvoten er midlertidig nådd. Vent litt og prøv igjen.");
+  }
+  if (isTransientGeminiError(error)) {
+    throw new HttpError(503, "Google Gemini har høy trafikk akkurat nå. Prøv igjen om noen sekunder.");
   }
   if (/SAFETY|BLOCKED|PROHIBITED/i.test(raw)) {
     throw new HttpError(422, "Innholdet ble stoppet av sikkerhetsfilteret. Prøv å omformulere teksten litt.");

@@ -1,5 +1,5 @@
 import { handle, HttpError, limitAttempts, readJson, requireTeacher, text } from "@/lib/auth";
-import { geminiClient, mapGeminiError } from "@/lib/gemini";
+import { geminiClient, isTransientGeminiError, mapGeminiError } from "@/lib/gemini";
 import {
   MAX_TTS_REQUEST_CHARS,
   MAX_TTS_REQUEST_TURNS,
@@ -93,21 +93,40 @@ export async function POST(request: Request) {
         }
       : [{ voice: singleVoice }];
 
+    const ttsModels =
+      quality === "fast"
+        ? [PODCAST_MODELS.fast.id, PODCAST_MODELS.standard.id]
+        : [PODCAST_MODELS.standard.id, PODCAST_MODELS.fast.id];
+
     try {
       const client = geminiClient("v1beta");
-      const interaction = await client.interactions.create({
-        model: PODCAST_MODELS[quality].id,
-        input: [{ type: "user_input", content }],
-        store: false,
-        response_format: {
-          type: "audio",
-          mime_type: "audio/l16",
-          sample_rate: SAMPLE_RATE,
-        },
-        generation_config: {
-          speech_config: speechConfig,
-        },
-      });
+      let interaction: Awaited<ReturnType<typeof client.interactions.create>> | null = null;
+      let lastError: unknown;
+
+      for (const model of ttsModels) {
+        try {
+          interaction = await client.interactions.create({
+            model,
+            input: [{ type: "user_input", content }],
+            store: false,
+            response_format: {
+              type: "audio",
+              mime_type: "audio/l16",
+              sample_rate: SAMPLE_RATE,
+            },
+            generation_config: {
+              speech_config: speechConfig,
+            },
+          });
+          break;
+        } catch (err) {
+          lastError = err;
+          if (!isTransientGeminiError(err)) throw err;
+          console.warn(`[gemini] ${model} midlertidig opptatt (503), prøver reservemodell …`);
+        }
+      }
+
+      if (!interaction) throw lastError ?? new Error("Ingen svar fra Google TTS.");
 
       const base64Audio = interaction.output_audio?.data;
       if (!base64Audio) {

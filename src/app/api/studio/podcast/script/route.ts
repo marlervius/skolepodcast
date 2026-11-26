@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { handle, HttpError, limitAttempts, readJson, requireCourseOwner, text } from "@/lib/auth";
 import { getCourse, getTopic } from "@/lib/db";
-import { geminiClient, mapGeminiError } from "@/lib/gemini";
+import { geminiClient, isTransientGeminiError, mapGeminiError } from "@/lib/gemini";
 import {
   MAX_SOURCE_CHARS,
   PODCAST_LANGUAGES,
@@ -125,19 +125,35 @@ export async function POST(request: Request) {
       `Kildemateriale / pensumnotater:\n"""\n${sourceText}\n"""`,
     ].filter(Boolean).join("\n\n");
 
+    const SCRIPT_MODELS = ["gemini-4-hydrogen", "gemini-3.5-flash-lite", "gemini-4-argon"] as const;
+
     try {
-      const client = geminiClient();
-      const interaction = await client.interactions.create({
-        model: "gemini-4-hydrogen",
-        system_instruction: systemInstruction,
-        input: userPrompt,
-        store: false,
-        response_format: {
-          type: "text",
-          mime_type: "application/json",
-          schema: SCRIPT_SCHEMA,
-        },
-      });
+      const client = geminiClient("v1beta");
+      let interaction: Awaited<ReturnType<typeof client.interactions.create>> | null = null;
+      let lastError: unknown;
+
+      for (const model of SCRIPT_MODELS) {
+        try {
+          interaction = await client.interactions.create({
+            model,
+            system_instruction: systemInstruction,
+            input: userPrompt,
+            store: false,
+            response_format: {
+              type: "text",
+              mime_type: "application/json",
+              schema: SCRIPT_SCHEMA,
+            },
+          });
+          break;
+        } catch (err) {
+          lastError = err;
+          if (!isTransientGeminiError(err)) throw err;
+          console.warn(`[gemini] ${model} midlertidig opptatt (503), prøver neste modell …`);
+        }
+      }
+
+      if (!interaction) throw lastError ?? new Error("Ingen svar fra Gemini.");
 
       const rawText = interaction.output_text?.trim();
       if (!rawText) {
