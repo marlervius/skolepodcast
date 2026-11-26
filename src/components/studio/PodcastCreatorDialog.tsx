@@ -2,7 +2,7 @@
 
 import {
   ArrowDown, ArrowLeft, ArrowUp, Check, Download, FileText, Headphones, Info,
-  LoaderCircle, Mic, Plus, Sparkles, Trash2, Users, Volume2, X,
+  LoaderCircle, Mic, Plus, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -12,13 +12,20 @@ import {
   parseDirectScript,
   PODCAST_LANGUAGES,
   PODCAST_LENGTHS,
+  PODCAST_LEVELS,
   PODCAST_MODELS,
+  PODCAST_REFINEMENTS,
+  PODCAST_STYLES,
   PODCAST_VOICES,
+  TURN_STYLES,
   type PodcastFormat,
   type PodcastLanguage,
   type PodcastLength,
+  type PodcastLevel,
   type PodcastQuality,
+  type PodcastRefinement,
   type PodcastScript,
+  type PodcastStyle,
   type PodcastTurn,
 } from "@/lib/podcast";
 import type { Course, Topic } from "@/lib/types";
@@ -97,6 +104,10 @@ export function PodcastCreatorDialog({
   const [language, setLanguage] = useState<PodcastLanguage>("nb");
   const [length, setLength] = useState<PodcastLength>("medium");
   const [quality, setQuality] = useState<PodcastQuality>("standard");
+  const [style, setStyle] = useState<PodcastStyle>("explainer");
+  const [level, setLevel] = useState<PodcastLevel>("auto");
+  const [mainThread, setMainThread] = useState("");
+  const [focusAreas, setFocusAreas] = useState("");
   const [hostAName, setHostAName] = useState("Nora");
   const [hostBName, setHostBName] = useState("Henrik");
   const [voiceA, setVoiceA] = useState("Kore");
@@ -226,6 +237,10 @@ export function PodcastCreatorDialog({
           format,
           language,
           length,
+          style,
+          level,
+          main_thread: mainThread,
+          focus_areas: focusAreas,
           host_a_name: hostAName,
           host_b_name: hostBName,
           instructions,
@@ -237,6 +252,46 @@ export function PodcastCreatorDialog({
       setTurns(result.script.turns);
       replaceGenerated(null);
       setStep("script");
+    } catch (failure) {
+      setError(messageFrom(failure));
+    } finally {
+      setBusyMode("idle");
+      setStatusLabel("");
+    }
+  }
+
+  async function refineScript(refinement: PodcastRefinement) {
+    if (!activeTurns.length) return;
+    setError("");
+    setBusyMode("script");
+    setStatusLabel(`${PODCAST_REFINEMENTS[refinement].label} …`);
+    try {
+      const result = await studioRequest<{ script: PodcastScript }>(
+        "/api/studio/podcast/script",
+        studioJson("POST", {
+          course_id: course.id,
+          topic_id: topicId,
+          source_text: sourceText,
+          format,
+          language,
+          length,
+          style,
+          level,
+          main_thread: mainThread,
+          focus_areas: focusAreas,
+          host_a_name: hostAName,
+          host_b_name: hostBName,
+          instructions,
+          refinement,
+          existing_title: title,
+          existing_turns: activeTurns.map((t) => ({ speaker: t.speaker, text: t.text })),
+        }),
+      );
+      setTitle(result.script.title);
+      if (result.script.description) setDescription(result.script.description);
+      if (result.script.study_notes) setStudyNotes(result.script.study_notes);
+      setTurns(result.script.turns);
+      replaceGenerated(null);
     } catch (failure) {
       setError(messageFrom(failure));
     } finally {
@@ -649,16 +704,79 @@ export function PodcastCreatorDialog({
               </small>
             </div>
 
-            <label>
-              Ekstra instruksjon <span className="studio-optional">valgfritt</span>
-              <input
-                value={instructions}
-                maxLength={800}
-                disabled={busy}
-                onChange={(e) => setInstructions(e.target.value)}
-                placeholder="F.eks. «Forklar ekstra enkelt for 10. trinn, bruk eksempler fra hverdagen og avslutt med en oppsummering»"
-              />
-            </label>
+            <section className="studio-pod-panel" aria-label="Regi, rød tråd og fokus">
+              <div className="studio-pod-panel-head">
+                <SlidersHorizontal size={15} />
+                <strong>Regi, rød tråd og fokus</strong>
+                <small>Styr vinkel, nivå og hva episoden må dekke</small>
+              </div>
+
+              <div className="studio-pod-style-wrap">
+                <span className="studio-pod-sublabel">Episodetype</span>
+                <div className="studio-pod-chips" role="radiogroup" aria-label="Episodetype">
+                  {(Object.keys(PODCAST_STYLES) as PodcastStyle[]).map((key) => {
+                    const selected = style === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        disabled={busy}
+                        className={`studio-pod-chip${selected ? " studio-pod-chip--active" : ""}`}
+                        onClick={() => setStyle(key)}
+                      >
+                        {PODCAST_STYLES[key].label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <small className="studio-muted">{PODCAST_STYLES[style].hint}</small>
+              </div>
+
+              <div className="studio-form-row">
+                <label>
+                  Nivå og målgruppe
+                  <select value={level} disabled={busy} onChange={(e) => setLevel(e.target.value as PodcastLevel)}>
+                    {(Object.keys(PODCAST_LEVELS) as PodcastLevel[]).map((key) => (
+                      <option key={key} value={key}>{PODCAST_LEVELS[key].label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Rød tråd / kjernespørsmål <span className="studio-optional">valgfritt</span>
+                  <input
+                    value={mainThread}
+                    maxLength={400}
+                    disabled={busy}
+                    onChange={(e) => setMainThread(e.target.value)}
+                    placeholder="F.eks. Hvorfor brøt freden sammen i 1939?"
+                  />
+                </label>
+              </div>
+
+              <label>
+                Fokusområder og nøkkelbegreper <span className="studio-optional">valgfritt</span>
+                <input
+                  value={focusAreas}
+                  maxLength={600}
+                  disabled={busy}
+                  onChange={(e) => setFocusAreas(e.target.value)}
+                  placeholder="F.eks. Versaillestraktaten, inflasjon, dolkestøtlegenden — forklar med enkle eksempler"
+                />
+              </label>
+
+              <label>
+                Ekstra regi / rollefordeling <span className="studio-optional">valgfritt</span>
+                <input
+                  value={instructions}
+                  maxLength={800}
+                  disabled={busy}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  placeholder="F.eks. «La Nora stille nysgjerrige elevspørsmål og Henrik svare med konkrete analogier»"
+                />
+              </label>
+            </section>
 
             {error && <p className="studio-error" role="alert">{error}</p>}
 
@@ -739,26 +857,65 @@ export function PodcastCreatorDialog({
               </div>
             )}
 
+            <div className="studio-pod-refine-bar">
+              <span className="studio-pod-refine-label">
+                {busyMode === "script" ? (
+                  <><LoaderCircle size={14} className="studio-spinner" /> {statusLabel}</>
+                ) : (
+                  <><Sparkles size={14} /> Juster hele manuset:</>
+                )}
+              </span>
+              <div className="studio-pod-refine-btns">
+                {(Object.keys(PODCAST_REFINEMENTS) as PodcastRefinement[]).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className="studio-pod-chip"
+                    disabled={busy || !activeTurns.length}
+                    onClick={() => refineScript(key)}
+                  >
+                    {PODCAST_REFINEMENTS[key].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="studio-pod-turns">
               {turns.map((turn, index) => {
                 const isB = format === "dialogue" && turn.speaker === "B";
                 const speakerLabel = isB ? (hostBName || "Vert 2") : (hostAName || "Vert 1");
+                const styleVal = turn.style || "";
+                const hasCustomStyle = Boolean(styleVal) && !TURN_STYLES.some((s) => s.value === styleVal);
                 return (
                   <div key={turn.id} className={`studio-pod-turn${isB ? " studio-pod-turn--b" : ""}`}>
                     <div className="studio-pod-turn-head">
-                      {format === "dialogue" ? (
-                        <button
-                          type="button"
-                          className={`studio-pod-badge studio-pod-badge--btn ${isB ? "studio-pod-badge--b" : "studio-pod-badge--a"}`}
+                      <div className="studio-pod-turn-left">
+                        {format === "dialogue" ? (
+                          <button
+                            type="button"
+                            className={`studio-pod-badge studio-pod-badge--btn ${isB ? "studio-pod-badge--b" : "studio-pod-badge--a"}`}
+                            disabled={busy}
+                            title="Klikk for å bytte taler"
+                            onClick={() => updateTurn(turn.id, { speaker: isB ? "A" : "B" })}
+                          >
+                            {speakerLabel}
+                          </button>
+                        ) : (
+                          <span className="studio-pod-badge studio-pod-badge--a">{speakerLabel}</span>
+                        )}
+                        <select
+                          aria-label="Tone på replikk"
+                          className="studio-pod-tone-select"
                           disabled={busy}
-                          title="Klikk for å bytte taler"
-                          onClick={() => updateTurn(turn.id, { speaker: isB ? "A" : "B" })}
+                          value={styleVal}
+                          onChange={(e) => updateTurn(turn.id, { style: e.target.value })}
                         >
-                          {speakerLabel}
-                        </button>
-                      ) : (
-                        <span className="studio-pod-badge studio-pod-badge--a">{speakerLabel}</span>
-                      )}
+                          {TURN_STYLES.map((opt) => (
+                            <option key={opt.value || "default"} value={opt.value}>{opt.label}</option>
+                          ))}
+                          {hasCustomStyle && <option value={styleVal}>{styleVal}</option>}
+                        </select>
+                      </div>
                       <div className="studio-row-actions">
                         <button
                           type="button"
@@ -812,14 +969,17 @@ export function PodcastCreatorDialog({
               })}
             </div>
 
-            <button
-              type="button"
-              className="studio-button"
-              disabled={busy}
-              onClick={() => addTurnAfter(turns.length - 1)}
-            >
-              <Plus size={16} /> Legg til replikk
-            </button>
+            <div className="studio-pod-turn-footer">
+              <button
+                type="button"
+                className="studio-button"
+                disabled={busy}
+                onClick={() => addTurnAfter(turns.length - 1)}
+              >
+                <Plus size={16} /> Legg til replikk
+              </button>
+              <small className="studio-muted">Tips: Skriv <code>&lt;short pause&gt;</code> for en kort tenkepause.</small>
+            </div>
 
             {progress !== null && busyMode === "tts" && (
               <div className="studio-upload-progress" role="status">

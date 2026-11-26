@@ -3,6 +3,9 @@ export type PodcastLanguage = "nb" | "nn" | "en";
 export type PodcastLength = "short" | "medium" | "long";
 export type PodcastQuality = "standard" | "fast";
 export type PodcastSpeaker = "A" | "B";
+export type PodcastStyle = "explainer" | "exam" | "debate" | "story" | "quiz";
+export type PodcastLevel = "auto" | "middle" | "highschool" | "intro" | "deep";
+export type PodcastRefinement = "simpler" | "examples" | "shorter";
 
 export type PodcastTurn = {
   id: string;
@@ -66,6 +69,82 @@ export const PODCAST_MODELS: Record<PodcastQuality, { id: string; label: string;
     hint: "Gemini 3.8 Flash-Lite TTS — raskere og lavere kostnad",
   },
 };
+
+export const PODCAST_STYLES: Record<PodcastStyle, { label: string; hint: string; promptRule: string }> = {
+  explainer: {
+    label: "Forklarende samtale",
+    hint: "Bygger forståelse steg for steg med hverdagseksempler",
+    promptRule: "Start med en fengende åpning som vekker nysgjerrighet, forklar stoffet logisk steg for steg med konkrete eksempler, og avslutt med en kort oppsummering av det viktigste.",
+  },
+  exam: {
+    label: "Eksamensrepetisjon",
+    hint: "Strukturert, spisset og med rask oppsummering til slutt",
+    promptRule: "Hold et effektivt og tydelig repetisjonstempo. Prioriter hovedsammenhenger, typiske eksamensspørsmål og vanlige fallgruver, og avslutt med en stram 3-punkts sjekkliste eleven bør huske.",
+  },
+  debate: {
+    label: "To perspektiver",
+    hint: "Drøfter ulike synspunkter, fordeler, ulemper og nyanser",
+    promptRule: "Belys temaet fra minst to ulike perspektiver eller argumenter (i to-stemmers modus kan vertene utforske hvert sitt perspektiv respektfullt). Drøft styrker og svakheter før en balansert avrunding.",
+  },
+  story: {
+    label: "Historie og case",
+    hint: "Starter i en konkret hendelse og knytter teorien til den",
+    promptRule: "Åpne midt i en levende, konkret case eller hendelse som gjør temaet nært og forståelig. Bruk casen som rød tråd gjennom hele episoden og trekk ut fagbegrepene fra den underveis.",
+  },
+  quiz: {
+    label: "Quiz og repetisjon",
+    hint: "Stiller kontrollspørsmål med kort tenkepause før fasit",
+    promptRule: "Flett inn 3–4 korte kontrollspørsmål underveis i episoden. Etter hvert spørsmål, legg inn <short pause> slik at eleven rekker å tenke selv, og gi deretter et tydelig, oppmuntrende svar med kort forklaring.",
+  },
+};
+
+export const PODCAST_LEVELS: Record<PodcastLevel, { label: string; promptRule: string }> = {
+  auto: {
+    label: "Tilpass etter fagrommet",
+    promptRule: "Tilpass språknivå og faglig dybde til faget og klassetrinnet som står i konteksten.",
+  },
+  middle: {
+    label: "Ungdomsskole (8.–10. trinn)",
+    promptRule: "Tilpass til elever på ungdomsskolen (8.–10. trinn). Bruk tydelig, hverdagslig språk, forklar alle fagord med en gang og koble til ting ungdom kjenner igjen.",
+  },
+  highschool: {
+    label: "Videregående (VG1–VG3)",
+    promptRule: "Tilpass til elever på videregående skole (VG1–VG3). Bruk presise fagbegreper, legg vekt på årsak–virkning og drøfting, og gjør stoffet relevant for prøver og eksamen.",
+  },
+  intro: {
+    label: "Enkel introduksjon",
+    promptRule: "Forutsett ingen forkunnskaper. Forklar helt fra bunnen av i rolig tempo med enkle analogier og korte setninger.",
+  },
+  deep: {
+    label: "Fordypning",
+    promptRule: "Gå i dybden på nyanser, sammenhenger, motargumenter og sentrale fagbegreper for elever som allerede kan det grunnleggende.",
+  },
+};
+
+export const PODCAST_REFINEMENTS: Record<PodcastRefinement, { label: string; instruction: string }> = {
+  simpler: {
+    label: "Gjør enklere",
+    instruction: "Omskriv manuset slik at språket blir enklere, mer muntlig og lettere å forstå, med kortere setninger og tydeligere forklaringer av fagbegreper. Behold den røde tråden og faglig presisjon.",
+  },
+  examples: {
+    label: "Flere eksempler",
+    instruction: "Forbedre manuset ved å legge inn flere konkrete, engasjerende hverdagseksempler og gode analogier som gjør teorien lett å se for seg. Behold strukturen og den røde tråden.",
+  },
+  shorter: {
+    label: "Stram inn",
+    instruction: "Gjør manuset cirka 30 prosent kortere og mer poengtert. Kutt gjentakelser og småprat, men behold alle kjernebegreper, den røde tråden og en god avslutning.",
+  },
+};
+
+export const TURN_STYLES: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "", label: "Naturlig tone" },
+  { value: "warm and enthusiastic", label: "Engasjert og varm" },
+  { value: "calm and clear", label: "Rolig og forklarende" },
+  { value: "curious and questioning", label: "Nysgjerrig" },
+  { value: "lighthearted and friendly", label: "Lett og vennlig" },
+  { value: "thoughtful and serious", label: "Ettertenksom" },
+  { value: "energetic and upbeat", label: "Energisk" },
+];
 
 export const MAX_SOURCE_CHARS = 24_000;
 export const MAX_TTS_CHUNK_CHARS = 950;
