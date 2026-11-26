@@ -27,6 +27,7 @@ export type Topic = {
   course_id: string;
   title: string;
   description: string;
+  notebook_url?: string;
   sort_order: number;
   created_at?: string;
   episodes: Episode[];
@@ -42,6 +43,7 @@ export type CourseSummary = {
   description: string;
   code: string;
   accent_color: string;
+  notebook_url?: string;
   created_at?: string;
   episode_count: number;
   topic_count: number;

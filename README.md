@@ -3,7 +3,8 @@
 «Spotify for pensum»: lærere publiserer podkaster og undervisningsvideoer (for eksempel fra NotebookLM), og elevene lytter på mobilen uten å logge inn.
 
 - **Elever** (`/`, `/fag/[kode]`): legger til fag med klassekode eller QR-kode, lytter i en spiller som fortsetter mens de navigerer, og styrer avspillingen fra låseskjermen.
-- **Lærere** (`/studio`): oppretter konto, lager fagrom og kapitler, laster opp lyd og video med dra-og-slipp, og viser QR-kode på tavla.
+- **Lærere** (`/studio`): oppretter konto, lager fagrom og kapitler, kobler til NotebookLM-notatbøker, laster opp lyd og video med dra-og-slipp (med automatisk WAV-komprimering og studieguide-import), og viser QR-kode på tavla.
+- **NotebookLM-utvidelse** (`extension/`): Chrome/Edge-utvidelse som legger til en «Send til Lytterom»-knapp direkte på `notebooklm.google.com` for publisering rett til riktig fagrom og kapittel. Se [extension/README.md](extension/README.md).
 
 ## Kom i gang lokalt
 
@@ -37,6 +38,7 @@ npm run dev
 | `LYTTEROM_SECRET` | i produksjon | Minst 32 tegn. Signerer lærerens innloggingscookie |
 | `LYTTEROM_INVITE_CODE` | i produksjon | Kode nye lærere må oppgi. Uten den er registreringen stengt i produksjon |
 | `LYTTEROM_MAX_UPLOAD_MB` | nei | Største filstørrelse, standard 50 (grensen på Supabase sin gratisplan) |
+| `GEMINI_API_KEY` | nei | API-nøkkel fra [Google AI Studio](https://aistudio.google.com/apikey). Aktiverer innebygd Podcast Creator (manus + Google TTS) i `/studio` |
 
 ## Slik er appen bygget
 

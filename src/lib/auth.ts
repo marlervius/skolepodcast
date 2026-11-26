@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { courseOwner, getTeacher } from "./db";
 import type { Teacher } from "./types";
@@ -44,7 +44,12 @@ export function readSessionToken(token: string | undefined): string | null {
 
 export async function currentTeacher(): Promise<Teacher | null> {
   const store = await cookies();
-  const id = readSessionToken(store.get(SESSION_COOKIE)?.value);
+  let token = store.get(SESSION_COOKIE)?.value;
+  if (!token) {
+    const authHeader = (await headers()).get("authorization");
+    if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7).trim();
+  }
+  const id = readSessionToken(token);
   return id ? await getTeacher(id) : null;
 }
 

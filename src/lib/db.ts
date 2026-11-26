@@ -1,7 +1,17 @@
 import { randomUUID } from "node:crypto";
+import { HttpError } from "./auth";
 import { DEMO_COURSE_ID, DEMO_EMAIL, DEMO_TEACHER_ID, demoCourse, demoEpisodes, demoTopics } from "./demo";
 import { check, supabase } from "./supabase";
 import type { Course, CourseSummary, Episode, MediaType, Teacher, Topic } from "./types";
+
+function isMissingNotebookColumn(error: { code?: string; message?: string } | null) {
+  if (!error) return false;
+  return (error.code === "42703" || error.code === "PGRST204") && /notebook_url/i.test(error.message ?? "");
+}
+
+function throwNotebookMigrationHint(): never {
+  throw new HttpError(500, "Databasen må oppdateres for NotebookLM-lenker. Kjør supabase/schema.sql i Supabase SQL Editor.");
+}
 
 /*
  * Datalaget. Alt går via Supabase (PostgreSQL) med service role-nøkkelen.
@@ -63,6 +73,25 @@ export async function listTeacherCourses(teacherId: string): Promise<CourseSumma
   await db();
   return check(await summaries().eq("teacher_id", teacherId).order("created_at", { ascending: false }));
 }
+
+export type TeacherCourseWithTopics = CourseSummary & {
+  topics: { id: string; title: string; notebook_url?: string }[];
+};
+
+export async function listTeacherCoursesWithTopics(teacherId: string): Promise<TeacherCourseWithTopics[]> {
+  const client = await db();
+  const courses = await listTeacherCourses(teacherId);
+  if (!courses.length) return [];
+  const ids = courses.map((course) => course.id);
+  const topicsRes = await client.from("topics").select("*").in("course_id", ids).order("sort_order").order("created_at");
+  const topicRows: Omit<Topic, "episodes">[] = check(topicsRes);
+  return courses.map((course) => ({
+    ...course,
+    topics: topicRows
+      .filter((topic) => topic.course_id === course.id)
+      .map((topic) => ({ id: topic.id, title: topic.title, notebook_url: topic.notebook_url ?? "" })),
+  }));
+}
 export async function getCourseSummariesByCodes(codes: string[]): Promise<CourseSummary[]> {
   if (!codes.length) return [];
   await db();
@@ -112,12 +141,21 @@ export type CourseInput = {
   description: string;
   code: string;
   accent_color: string;
+  notebook_url?: string;
 };
 
 export async function createCourse(teacherId: string, input: CourseInput, firstTopicTitle: string) {
   const client = await db();
   const id = randomUUID();
-  check(await client.from("courses").insert({ id, teacher_id: teacherId, ...input }));
+  const insertRes = await client.from("courses").insert({ id, teacher_id: teacherId, ...input });
+  if (isMissingNotebookColumn(insertRes.error)) {
+    if (input.notebook_url) throwNotebookMigrationHint();
+    const { notebook_url: _, ...withoutNotebook } = input;
+    void _;
+    check(await client.from("courses").insert({ id, teacher_id: teacherId, ...withoutNotebook }));
+  } else {
+    check(insertRes);
+  }
   const topic = await client.from("topics").insert({ id: randomUUID(), course_id: id, title: firstTopicTitle, description: "", sort_order: 0 });
   if (topic.error) {
     await client.from("courses").delete().eq("id", id);
@@ -128,7 +166,17 @@ export async function createCourse(teacherId: string, input: CourseInput, firstT
 export async function updateCourse(id: string, input: Partial<CourseInput>) {
   const client = await db();
   const fields = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
-  if (Object.keys(fields).length) check(await client.from("courses").update(fields).eq("id", id));
+  if (Object.keys(fields).length) {
+    const updateRes = await client.from("courses").update(fields).eq("id", id);
+    if (isMissingNotebookColumn(updateRes.error)) {
+      if (input.notebook_url) throwNotebookMigrationHint();
+      const { notebook_url: _, ...withoutNotebook } = fields;
+      void _;
+      if (Object.keys(withoutNotebook).length) check(await client.from("courses").update(withoutNotebook).eq("id", id));
+    } else {
+      check(updateRes);
+    }
+  }
   return (await getCourse(id))!;
 }
 /** Sletter fagrommet og returnerer adressene til opplastede filer som må ryddes bort. */
@@ -152,19 +200,36 @@ async function nextSortOrder(table: "topics" | "episodes", parentColumn: "course
   return rows.length ? rows[0].sort_order + 1 : 0;
 }
 
-export async function createTopic(courseId: string, title: string, description: string) {
+export async function createTopic(courseId: string, title: string, description: string, notebookUrl = "") {
   const client = await db();
-  const row = { id: randomUUID(), course_id: courseId, title, description, sort_order: await nextSortOrder("topics", "course_id", courseId) };
-  return check(await client.from("topics").insert(row).select("*").single()) as Omit<Topic, "episodes">;
+  const sort_order = await nextSortOrder("topics", "course_id", courseId);
+  const baseRow = { id: randomUUID(), course_id: courseId, title, description, sort_order };
+  const row = notebookUrl ? { ...baseRow, notebook_url: notebookUrl } : baseRow;
+  const insertRes = await client.from("topics").insert(row).select("*").single();
+  if (isMissingNotebookColumn(insertRes.error)) {
+    if (notebookUrl) throwNotebookMigrationHint();
+    return check(await client.from("topics").insert(baseRow).select("*").single()) as Omit<Topic, "episodes">;
+  }
+  return check(insertRes) as Omit<Topic, "episodes">;
 }
 export async function getTopic(id: string): Promise<Omit<Topic, "episodes"> | null> {
   const client = await db();
   return check(await client.from("topics").select("*").eq("id", id).maybeSingle());
 }
-export async function updateTopic(id: string, input: { title?: string; description?: string }) {
+export async function updateTopic(id: string, input: { title?: string; description?: string; notebook_url?: string }) {
   const client = await db();
   const fields = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
-  if (Object.keys(fields).length) check(await client.from("topics").update(fields).eq("id", id));
+  if (Object.keys(fields).length) {
+    const updateRes = await client.from("topics").update(fields).eq("id", id);
+    if (isMissingNotebookColumn(updateRes.error)) {
+      if (input.notebook_url) throwNotebookMigrationHint();
+      const { notebook_url: _, ...withoutNotebook } = fields;
+      void _;
+      if (Object.keys(withoutNotebook).length) check(await client.from("topics").update(withoutNotebook).eq("id", id));
+    } else {
+      check(updateRes);
+    }
+  }
   return (await getTopic(id))!;
 }
 export async function deleteTopic(id: string) {

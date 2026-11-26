@@ -1,26 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  ArrowDown, ArrowUp, BookOpen, Eye, FileAudio, FileVideo, Headphones, LoaderCircle, LogOut, Pencil,
-  QrCode, Trash2, Youtube,
+  ArrowDown, ArrowUp, BookOpen, ExternalLink, Eye, FileAudio, FileVideo, Headphones, LoaderCircle, LogOut, Mic, Pencil,
+  QrCode, Sparkles, Trash2, UploadCloud, Youtube,
 } from "lucide-react";
 import type { Course, CourseSummary, Episode, Teacher, Topic } from "@/lib/types";
 import { durationLabel, messageFrom, studioJson, studioRequest } from "./api";
+import { NotebookBatchImportDialog, NotebookToolkitDialog } from "./NotebookDialogs";
+import { PodcastCreatorDialog } from "./PodcastCreatorDialog";
 import { AddButton, CourseDialog, DeleteDialog, EpisodeDialog, PreviewDialog, ShareDialog, TopicDialog } from "./StudioDialogs";
+
+const mediaExtensions = /\.(mp3|m4a|wav|ogg|aac|flac|mp4|webm|mov)$/i;
 
 type DialogState =
   | { kind: "course"; course?: Course }
   | { kind: "topic"; topic?: Topic }
-  | { kind: "episode"; topic: Topic; episode?: Episode }
+  | { kind: "episode"; topic: Topic; episode?: Episode; initialFile?: File }
+  | { kind: "podcast"; topic?: Topic }
+  | { kind: "batch"; topic: Topic; files: File[] }
+  | { kind: "notebook"; topicId?: string }
   | { kind: "share" }
   | { kind: "preview"; episode: Episode }
   | { kind: "delete"; title: string; detail: string; target: "fagrom" | "kapittel" | "episode"; endpoint: string };
 
 const SELECTED_KEY = "lytterom_studio_course_v1";
 
-export function StudioClient({ maxUploadMb }: { maxUploadMb: number }) {
+export function StudioClient({ maxUploadMb, geminiConfigured }: { maxUploadMb: number; geminiConfigured: boolean }) {
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
 
   useEffect(() => {
@@ -33,7 +40,7 @@ export function StudioClient({ maxUploadMb }: { maxUploadMb: number }) {
     return <div className="studio-loading"><LoaderCircle className="studio-spinner" size={26} /> Laster studio …</div>;
   }
   if (!teacher) return <AuthScreen onAuthenticated={setTeacher} />;
-  return <Studio teacher={teacher} maxUploadMb={maxUploadMb} onLogout={() => setTeacher(null)} />;
+  return <Studio teacher={teacher} maxUploadMb={maxUploadMb} geminiConfigured={geminiConfigured} onLogout={() => setTeacher(null)} />;
 }
 
 /* ---------- Innlogging og registrering ---------- */
@@ -108,13 +115,29 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (teacher: Teacher) =
 
 /* ---------- Selve studioet ---------- */
 
-function Studio({ teacher, maxUploadMb, onLogout }: { teacher: Teacher; maxUploadMb: number; onLogout: () => void }) {
+function Studio({ teacher, maxUploadMb, geminiConfigured, onLogout }: { teacher: Teacher; maxUploadMb: number; geminiConfigured: boolean; onLogout: () => void }) {
   const [courses, setCourses] = useState<CourseSummary[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [course, setCourse] = useState<Course | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
+  const [dropTopicId, setDropTopicId] = useState<string | null>(null);
+  const batchPicker = useRef<HTMLInputElement>(null);
+  const batchTargetTopic = useRef<Topic | null>(null);
+
+  function handleTopicFiles(topic: Topic, fileList: FileList | File[]) {
+    const valid = Array.from(fileList).filter((file) => mediaExtensions.test(file.name));
+    if (!valid.length) {
+      setToast("Slipp lyd- eller videofiler (WAV, M4A, MP3, MP4 osv.) fra NotebookLM.");
+      return;
+    }
+    if (valid.length === 1) {
+      setDialog({ kind: "episode", topic, initialFile: valid[0] });
+    } else {
+      setDialog({ kind: "batch", topic, files: valid });
+    }
+  }
 
   const loadCourses = useCallback(async () => {
     const result = await studioRequest<{ courses: CourseSummary[] }>("/api/courses?mine=1");
@@ -222,9 +245,18 @@ function Studio({ teacher, maxUploadMb, onLogout }: { teacher: Teacher; maxUploa
                 <h1>{course.title}</h1>
                 {course.description && <p className="studio-course-description">{course.description}</p>}
                 <p className="studio-code-badge">Klassekode <strong>{course.code}</strong></p>
+                {course.notebook_url && (
+                  <a className="studio-nb-chip" href={course.notebook_url} target="_blank" rel="noreferrer">
+                    <Sparkles size={14} /> Åpne NotebookLM <ExternalLink size={13} />
+                  </a>
+                )}
               </div>
               <div className="studio-course-actions">
                 <button className="studio-button studio-button--primary" onClick={() => setDialog({ kind: "share" })}><QrCode size={17} /> Del med klassen</button>
+                {course.topics.length > 0 && (
+                  <button className="studio-button" onClick={() => setDialog({ kind: "podcast" })}><Mic size={16} /> Lag podkast</button>
+                )}
+                <button className="studio-button" onClick={() => setDialog({ kind: "notebook" })}><Sparkles size={16} /> NotebookLM</button>
                 <Link className="studio-button" href={`/fag/${encodeURIComponent(course.code)}`} target="_blank"><Eye size={17} /> Se som elev</Link>
                 <button className="studio-button" onClick={() => setDialog({ kind: "course", course })}><Pencil size={16} /> Rediger</button>
                 <button
@@ -240,9 +272,45 @@ function Studio({ teacher, maxUploadMb, onLogout }: { teacher: Teacher; maxUploa
               </div>
             </header>
 
+            <input
+              hidden
+              type="file"
+              multiple
+              accept=".mp3,.m4a,.wav,.ogg,.aac,.flac,.mp4,.webm,.mov"
+              ref={batchPicker}
+              onChange={(event) => {
+                const target = batchTargetTopic.current;
+                if (target && event.currentTarget.files?.length) {
+                  handleTopicFiles(target, event.currentTarget.files);
+                }
+                event.currentTarget.value = "";
+              }}
+            />
+
             <div className="studio-topics">
-              {course.topics.map((topic, topicIndex) => (
-                <section key={topic.id} className="studio-topic">
+              {course.topics.map((topic, topicIndex) => {
+                const isDropping = dropTopicId === topic.id;
+                return (
+                <section
+                  key={topic.id}
+                  className={`studio-topic${isDropping ? " studio-topic--dropping" : ""}`}
+                  onDragOver={(event) => {
+                    if (event.dataTransfer.types.includes("Files")) {
+                      event.preventDefault();
+                      setDropTopicId(topic.id);
+                    }
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      setDropTopicId((prev) => (prev === topic.id ? null : prev));
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDropTopicId(null);
+                    if (event.dataTransfer.files.length) handleTopicFiles(topic, event.dataTransfer.files);
+                  }}
+                >
                   <header className="studio-topic-head">
                     <div>
                       <span className="studio-topic-number">Kapittel {topicIndex + 1}</span>
@@ -250,6 +318,27 @@ function Studio({ teacher, maxUploadMb, onLogout }: { teacher: Teacher; maxUploa
                       {topic.description && <p>{topic.description}</p>}
                     </div>
                     <div className="studio-row-actions">
+                      {topic.notebook_url ? (
+                        <a
+                          className="studio-icon-button studio-icon-button--accent"
+                          href={topic.notebook_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label="Åpne kapittelets notatbok i NotebookLM"
+                          title="Åpne i NotebookLM"
+                        >
+                          <ExternalLink size={16} />
+                        </a>
+                      ) : (
+                        <button
+                          className="studio-icon-button"
+                          onClick={() => setDialog({ kind: "notebook", topicId: topic.id })}
+                          aria-label="NotebookLM-maler for kapittelet"
+                          title="NotebookLM-maler"
+                        >
+                          <Sparkles size={16} />
+                        </button>
+                      )}
                       <button className="studio-icon-button" disabled={topicIndex === 0} onClick={() => move(`/api/topics/${topic.id}`, "up")} aria-label="Flytt kapittel opp"><ArrowUp size={16} /></button>
                       <button className="studio-icon-button" disabled={topicIndex === course.topics.length - 1} onClick={() => move(`/api/topics/${topic.id}`, "down")} aria-label="Flytt kapittel ned"><ArrowDown size={16} /></button>
                       <button className="studio-icon-button" onClick={() => setDialog({ kind: "topic", topic })} aria-label="Rediger kapittel"><Pencil size={16} /></button>
@@ -300,9 +389,30 @@ function Studio({ teacher, maxUploadMb, onLogout }: { teacher: Teacher; maxUploa
                   )}
                   <div className="studio-topic-foot">
                     <AddButton onClick={() => setDialog({ kind: "episode", topic })}>Ny episode</AddButton>
+                    <button
+                      type="button"
+                      className="studio-button"
+                      onClick={() => setDialog({ kind: "podcast", topic })}
+                    >
+                      <Mic size={16} /> Lag podkast
+                    </button>
+                    <button
+                      type="button"
+                      className="studio-button"
+                      onClick={() => {
+                        batchTargetTopic.current = topic;
+                        batchPicker.current?.click();
+                      }}
+                    >
+                      <UploadCloud size={16} /> Importer filer
+                    </button>
+                    <span className="studio-drop-hint">
+                      {isDropping ? "Slipp filene for å legge dem til i kapittelet" : "eller dra filer fra NotebookLM rett hit"}
+                    </span>
                   </div>
                 </section>
-              ))}
+                );
+              })}
               <button className="studio-add-topic" onClick={() => setDialog({ kind: "topic" })}>+ Nytt kapittel</button>
             </div>
           </>
@@ -311,7 +421,30 @@ function Studio({ teacher, maxUploadMb, onLogout }: { teacher: Teacher; maxUploa
 
       {dialog?.kind === "course" && <CourseDialog course={dialog.course} close={close} saved={saved} />}
       {dialog?.kind === "topic" && course && <TopicDialog course={course} topic={dialog.topic} close={close} saved={saved} />}
-      {dialog?.kind === "episode" && course && <EpisodeDialog course={course} topic={dialog.topic} episode={dialog.episode} maxUploadMb={maxUploadMb} close={close} saved={saved} />}
+      {dialog?.kind === "episode" && course && (
+        <EpisodeDialog course={course} topic={dialog.topic} episode={dialog.episode} initialFile={dialog.initialFile} maxUploadMb={maxUploadMb} close={close} saved={saved} />
+      )}
+      {dialog?.kind === "podcast" && course && (
+        <PodcastCreatorDialog
+          course={course}
+          initialTopic={dialog.topic}
+          maxUploadMb={maxUploadMb}
+          geminiConfigured={geminiConfigured}
+          close={close}
+          saved={saved}
+        />
+      )}
+      {dialog?.kind === "batch" && course && (
+        <NotebookBatchImportDialog course={course} topic={dialog.topic} files={dialog.files} maxUploadMb={maxUploadMb} close={close} saved={saved} />
+      )}
+      {dialog?.kind === "notebook" && course && (
+        <NotebookToolkitDialog
+          course={course}
+          initialTopicId={dialog.topicId}
+          close={close}
+          onEditCourse={() => setDialog({ kind: "course", course })}
+        />
+      )}
       {dialog?.kind === "share" && course && <ShareDialog course={course} close={close} />}
       {dialog?.kind === "preview" && <PreviewDialog episode={dialog.episode} close={close} />}
       {dialog?.kind === "delete" && <DeleteDialog title={dialog.title} detail={dialog.detail} kind={dialog.target} endpoint={dialog.endpoint} close={close} saved={saved} />}

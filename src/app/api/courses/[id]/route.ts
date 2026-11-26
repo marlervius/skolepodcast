@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { handle, HttpError, readJson, requireCourseOwner, text } from "@/lib/auth";
+import { currentTeacher, handle, HttpError, readJson, requireCourseOwner, text } from "@/lib/auth";
 import { deleteCourse, getCourse, isCodeTaken, updateCourse, type CourseInput } from "@/lib/db";
+import { parseNotebookUrl } from "@/lib/notebooklm";
 import { deleteMediaFiles } from "@/lib/storage";
 import { isCourseColor, normalizeCode } from "@/lib/types";
 
@@ -11,6 +12,19 @@ export async function GET(_request: Request, { params }: Context) {
   return handle(async () => {
     const course = await getCourse((await params).id);
     if (!course) throw new HttpError(404, "Fant ikke fagrommet.");
+    const viewer = await currentTeacher().catch(() => null);
+    if (viewer?.id !== course.teacher_id) {
+      const publicCourse = {
+        ...course,
+        topics: course.topics.map((topic) => {
+          const clean = { ...topic };
+          delete clean.notebook_url;
+          return clean;
+        }),
+      };
+      delete publicCourse.notebook_url;
+      return NextResponse.json({ course: publicCourse });
+    }
     return NextResponse.json({ course });
   });
 }
@@ -31,6 +45,11 @@ export async function PATCH(request: Request, { params }: Context) {
     }
     if (body.class_label !== undefined) input.class_label = text(body.class_label, 40);
     if (body.description !== undefined) input.description = text(body.description, 1200);
+    if (body.notebook_url !== undefined) {
+      const notebookUrl = parseNotebookUrl(body.notebook_url);
+      if (notebookUrl === null) throw new HttpError(400, "Lim inn en gyldig lenke til NotebookLM (notebooklm.google.com).");
+      input.notebook_url = notebookUrl;
+    }
     if (body.accent_color !== undefined && isCourseColor(body.accent_color)) input.accent_color = String(body.accent_color);
     if (body.code !== undefined) {
       const code = normalizeCode(body.code);

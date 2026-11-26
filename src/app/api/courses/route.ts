@@ -1,9 +1,27 @@
 import { NextResponse } from "next/server";
 import { handle, HttpError, readJson, requireTeacher, text } from "@/lib/auth";
-import { createCourse, getCourseByCode, getCourseSummariesByCodes, getCourseSummaryByCode, isCodeTaken, listTeacherCourses } from "@/lib/db";
-import { DEFAULT_COLOR, isCourseColor, normalizeCode } from "@/lib/types";
+import {
+  createCourse, getCourseByCode, getCourseSummariesByCodes, getCourseSummaryByCode, isCodeTaken,
+  listTeacherCourses, listTeacherCoursesWithTopics,
+} from "@/lib/db";
+import { MAX_UPLOAD_MB } from "@/lib/limits";
+import { parseNotebookUrl } from "@/lib/notebooklm";
+import { DEFAULT_COLOR, isCourseColor, normalizeCode, type Course, type CourseSummary } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+function stripPrivateFields<T extends CourseSummary>(course: T): T {
+  const clean = { ...course };
+  delete clean.notebook_url;
+  if ("topics" in clean && Array.isArray((clean as unknown as Course).topics)) {
+    (clean as unknown as Course).topics = (clean as unknown as Course).topics.map((topic) => {
+      const cleanTopic = { ...topic };
+      delete cleanTopic.notebook_url;
+      return cleanTopic;
+    });
+  }
+  return clean;
+}
 
 export async function GET(request: Request) {
   return handle(async () => {
@@ -13,14 +31,21 @@ export async function GET(request: Request) {
       // full=1 tar med kapitler og episoder (samme innhold som elevsiden /fag/KODE viser).
       const course = !code ? null : params.get("full") === "1" ? await getCourseByCode(code) : await getCourseSummaryByCode(code);
       if (!course) throw new HttpError(404, "Fant ikke noe fagrom med denne klassekoden.");
-      return NextResponse.json({ course });
+      return NextResponse.json({ course: stripPrivateFields(course) });
     }
     if (params.has("codes")) {
       const codes = [...new Set((params.get("codes") || "").split(",").map(normalizeCode).filter(Boolean))].slice(0, 50);
-      return NextResponse.json({ courses: await getCourseSummariesByCodes(codes) });
+      const courses = (await getCourseSummariesByCodes(codes)).map(stripPrivateFields);
+      return NextResponse.json({ courses });
     }
     if (params.get("mine") === "1") {
       const teacher = await requireTeacher();
+      if (params.get("with_topics") === "1") {
+        return NextResponse.json({
+          courses: await listTeacherCoursesWithTopics(teacher.id),
+          max_upload_mb: MAX_UPLOAD_MB,
+        });
+      }
       return NextResponse.json({ courses: await listTeacherCourses(teacher.id) });
     }
     throw new HttpError(400, "Oppgi code, codes eller mine=1.");
@@ -54,6 +79,10 @@ export async function POST(request: Request) {
     } else {
       code = await generateCode(subject, classLabel);
     }
+    const notebookUrl = parseNotebookUrl(body.notebook_url);
+    if (notebookUrl === null) {
+      throw new HttpError(400, "Lim inn en gyldig lenke til NotebookLM (notebooklm.google.com).");
+    }
     const course = await createCourse(teacher.id, {
       title,
       subject,
@@ -61,6 +90,7 @@ export async function POST(request: Request) {
       description: text(body.description, 1200),
       code,
       accent_color: isCourseColor(body.accent_color) ? String(body.accent_color) : DEFAULT_COLOR,
+      notebook_url: notebookUrl,
     }, "Kapittel 1");
     return NextResponse.json({ course }, { status: 201 });
   });

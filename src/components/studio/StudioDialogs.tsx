@@ -2,12 +2,14 @@
 
 import {
   BookOpen, Check, Copy, ExternalLink, FileAudio, FileVideo, Link2, LoaderCircle,
-  Plus, QrCode, Trash2, UploadCloud, X,
+  Plus, QrCode, Sparkles, Trash2, UploadCloud, X,
 } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { cleanNotebookFilename, parseNotebookStudyNotes } from "@/lib/notebooklm";
 import { COURSE_COLORS, DEFAULT_COLOR, type Course, type Episode, type Topic } from "@/lib/types";
 import { durationLabel, messageFrom, studioJson, studioRequest, uploadMedia } from "./api";
+import { compressAudioForUpload, formatBytes, isWavFile } from "./audioCompress";
 
 type DialogProps = {
   close: () => void;
@@ -136,6 +138,11 @@ export function CourseDialog({ course, close, saved }: DialogProps & { course?: 
         </div>
         <label>Beskrivelse<textarea name="description" defaultValue={course?.description} rows={3} maxLength={1200} /></label>
         <label>
+          NotebookLM-lenke <span className="studio-optional">valgfritt</span>
+          <input name="notebook_url" type="url" defaultValue={course?.notebook_url} placeholder="https://notebooklm.google.com/notebook/…" maxLength={500} />
+          <small>Gir deg én snarvei rett til notatboka der du lager podkaster og videoer for faget.</small>
+        </label>
+        <label>
           Klassekode <span className="studio-optional">{course ? "" : "valgfritt"}</span>
           <input name="code" className="studio-code-input" defaultValue={course?.code} placeholder="HIST-VG3" autoCapitalize="characters" maxLength={32} spellCheck={false} />
           {!course && <small>La feltet stå tomt for å få en automatisk kode.</small>}
@@ -181,6 +188,11 @@ export function TopicDialog({ course, topic, close, saved }: DialogProps & { cou
       <form className="studio-form" onSubmit={submit}>
         <label>Tittel<input name="title" defaultValue={topic?.title} placeholder="F.eks. Mellomkrigstiden" required maxLength={100} /></label>
         <label>Beskrivelse<textarea name="description" defaultValue={topic?.description} rows={3} maxLength={1200} /></label>
+        <label>
+          NotebookLM-lenke <span className="studio-optional">valgfritt</span>
+          <input name="notebook_url" type="url" defaultValue={topic?.notebook_url} placeholder="https://notebooklm.google.com/notebook/…" maxLength={500} />
+          <small>Bruk denne hvis kapittelet har en egen notatbok i NotebookLM.</small>
+        </label>
         {error && <p className="studio-error" role="alert">{error}</p>}
         <FormActions busy={busy} close={close} action={topic ? "Lagre endringer" : "Opprett kapittel"} />
       </form>
@@ -225,18 +237,25 @@ const currentMedia = {
 } as const;
 
 export function EpisodeDialog({
-  course, topic, episode, maxUploadMb, close, saved,
-}: DialogProps & { course: Course; topic: Topic; episode?: Episode; maxUploadMb: number }) {
+  course, topic, episode, initialFile, maxUploadMb, close, saved,
+}: DialogProps & { course: Course; topic: Topic; episode?: Episode; initialFile?: File; maxUploadMb: number }) {
   const { busy, error, run } = useSave();
   const [replacing, setReplacing] = useState(false);
   const showMedia = !episode || replacing;
   const [mode, setMode] = useState<"file" | "link">("file");
   const [file, setFile] = useState<File>();
   const [fileError, setFileError] = useState("");
+  const [compressWav, setCompressWav] = useState(true);
   const [title, setTitle] = useState(episode?.title || "");
+  const [description, setDescription] = useState(episode?.description || "");
+  const [studyNotes, setStudyNotes] = useState(episode?.study_notes || "");
+  const [showPasteBox, setShowPasteBox] = useState(false);
+  const [rawPaste, setRawPaste] = useState("");
+  const [pasteNotice, setPasteNotice] = useState("");
   const [lastFileTitle, setLastFileTitle] = useState("");
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [uploadStage, setUploadStage] = useState("");
   const filePicker = useRef<HTMLInputElement>(null);
   const duration = useRef<Promise<number>>(Promise.resolve(0));
 
@@ -246,15 +265,33 @@ export function EpisodeDialog({
       setFileError("Velg en lyd- eller videofil i et av formatene som er oppgitt.");
       return;
     }
-    if (selection.size > maxUploadMb * 1024 * 1024) {
+    const maxRawBytes = isWavFile(selection) ? Math.max(maxUploadMb * 5, 250) * 1024 * 1024 : maxUploadMb * 1024 * 1024;
+    if (selection.size > maxRawBytes) {
       setFileError(`Filen er for stor. Maks størrelse er ${maxUploadMb} MB. Lengre videoer kan legges på YouTube og lenkes inn.`);
       return;
     }
     setFile(selection);
-    const filename = selection.name.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim().slice(0, 140);
+    const filename = cleanNotebookFilename(selection.name);
     if (!title.trim() || title === lastFileTitle) setTitle(filename);
     setLastFileTitle(filename);
     duration.current = readDuration(selection);
+  }
+
+  useEffect(() => {
+    if (initialFile) chooseFile(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
+
+  function applyNotebookPaste() {
+    const parsed = parseNotebookStudyNotes(rawPaste);
+    if (!parsed.description && !parsed.studyNotes) return;
+    if (parsed.description && !description.trim()) setDescription(parsed.description);
+    if (parsed.studyNotes) {
+      setStudyNotes((prev) => (prev.trim() ? `${prev.trim()}\n\n${parsed.studyNotes}` : parsed.studyNotes));
+    }
+    setRawPaste("");
+    setShowPasteBox(false);
+    setPasteNotice("Fylt ut fra NotebookLM.");
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -268,11 +305,39 @@ export function EpisodeDialog({
 
     void run(async () => {
       try {
-        let fields: Record<string, unknown> = values;
+        let fields: Record<string, unknown> = {
+          ...values,
+          title,
+          description,
+          study_notes: studyNotes,
+        };
         if (uploading && file) {
-          setProgress(0);
-          const uploadPath = await uploadMedia(file, course.id, setProgress);
-          fields = { ...values, upload_path: uploadPath, duration_seconds: await duration.current };
+          let fileToUpload = file;
+          let measuredDuration = 0;
+
+          if (compressWav && isWavFile(file)) {
+            setUploadStage("Komprimerer WAV-lyd fra NotebookLM …");
+            setProgress(0);
+            const result = await compressAudioForUpload(file, setUploadStage);
+            fileToUpload = result.file;
+            measuredDuration = result.durationSeconds;
+            if (result.compressed) {
+              setUploadStage(`Laster opp (${formatBytes(result.originalBytes)} → ${formatBytes(result.finalBytes)})`);
+            } else {
+              setUploadStage("Laster opp");
+            }
+          } else {
+            setUploadStage("Laster opp");
+            setProgress(0);
+          }
+
+          if (fileToUpload.size > maxUploadMb * 1024 * 1024) {
+            throw new Error(`Filen er for stor (${formatBytes(fileToUpload.size)}). Maks størrelse er ${maxUploadMb} MB. Lengre videoer kan legges på YouTube og lenkes inn.`);
+          }
+
+          const uploadPath = await uploadMedia(fileToUpload, course.id, setProgress);
+          const finalDuration = measuredDuration || (await duration.current);
+          fields = { ...fields, upload_path: uploadPath, duration_seconds: finalDuration };
         }
         if (episode) {
           await studioRequest(`/api/episodes/${episode.id}`, studioJson("PATCH", fields));
@@ -282,6 +347,7 @@ export function EpisodeDialog({
         await saved(episode ? "Episoden er oppdatert." : "Episoden er publisert.");
       } finally {
         setProgress(null);
+        setUploadStage("");
       }
     });
   }
@@ -295,6 +361,7 @@ export function EpisodeDialog({
 
   const FileIcon = file && videoExtensions.test(file.name) ? FileVideo : FileAudio;
   const current = episode ? currentMedia[episode.media_type] : null;
+  const wavSelected = Boolean(file && isWavFile(file));
 
   const mediaFields = showMedia && (
     <>
@@ -303,42 +370,53 @@ export function EpisodeDialog({
         <button type="button" aria-pressed={mode === "link"} disabled={busy} onClick={() => setMode("link")}><Link2 size={16} /> YouTube / Vimeo</button>
       </div>
       {mode === "file" ? (
-        <div
-          className={`studio-dropzone${dragging ? " studio-dropzone--active" : ""}`}
-          onDragOver={(event) => {
-            event.preventDefault();
-            if (!busy) setDragging(true);
-          }}
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragging(false);
-            const selected = event.dataTransfer.files[0];
-            if (selected && !busy) chooseFile(selected);
-          }}
-        >
-          <input
-            hidden
-            type="file"
-            accept={acceptedFiles}
-            ref={filePicker}
-            disabled={busy}
-            onChange={(event) => {
-              const selected = event.currentTarget.files?.[0];
-              if (selected) chooseFile(selected);
-              event.currentTarget.value = "";
+        <>
+          <div
+            className={`studio-dropzone${dragging ? " studio-dropzone--active" : ""}`}
+            onDragOver={(event) => {
+              event.preventDefault();
+              if (!busy) setDragging(true);
             }}
-          />
-          {file ? <FileIcon size={27} /> : <UploadCloud size={27} />}
-          <strong>{file ? file.name : "Dra en lyd- eller videofil hit"}</strong>
-          <button type="button" className="studio-button" disabled={busy} onClick={() => filePicker.current?.click()}>
-            {file ? "Velg en annen fil" : "Velg fil"}
-          </button>
-          <small>MP3, M4A, WAV, OGG, AAC, FLAC, MP4, WEBM og MOV, maks {maxUploadMb} MB. Lengre videoer kan legges på YouTube.</small>
-          {fileError && <p className="studio-error" role="alert">{fileError}</p>}
-        </div>
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              const selected = event.dataTransfer.files[0];
+              if (selected && !busy) chooseFile(selected);
+            }}
+          >
+            <input
+              hidden
+              type="file"
+              accept={acceptedFiles}
+              ref={filePicker}
+              disabled={busy}
+              onChange={(event) => {
+                const selected = event.currentTarget.files?.[0];
+                if (selected) chooseFile(selected);
+                event.currentTarget.value = "";
+              }}
+            />
+            {file ? <FileIcon size={27} /> : <UploadCloud size={27} />}
+            <strong>{file ? `${file.name} (${formatBytes(file.size)})` : "Dra en lyd- eller videofil fra NotebookLM hit"}</strong>
+            <button type="button" className="studio-button" disabled={busy} onClick={() => filePicker.current?.click()}>
+              {file ? "Velg en annen fil" : "Velg fil"}
+            </button>
+            <small>MP3, M4A, WAV, OGG, AAC, FLAC, MP4, WEBM og MOV, maks {maxUploadMb} MB (WAV fra NotebookLM komprimeres automatisk).</small>
+            {fileError && <p className="studio-error" role="alert">{fileError}</p>}
+          </div>
+          {wavSelected && (
+            <label className="studio-nb-check">
+              <input type="checkbox" checked={compressWav} disabled={busy} onChange={(e) => setCompressWav(e.target.checked)} />
+              <span>
+                <strong>Komprimer WAV til M4A før opplasting</strong>
+                <small>Anbefalt for NotebookLM — krymper filen til en brøkdel og gjør strømming raskere for elevene.</small>
+              </span>
+            </label>
+          )}
+        </>
       ) : (
         <label>Videolenke<input name="embed_url" type="url" placeholder="https://www.youtube.com/watch?v=…" required /></label>
       )}
@@ -358,8 +436,37 @@ export function EpisodeDialog({
             </select>
           </label>
         )}
-        <label>Beskrivelse<textarea name="description" rows={3} defaultValue={episode?.description} maxLength={1600} /></label>
-        <label>Nøkkelpunkter og refleksjonsspørsmål<textarea name="study_notes" rows={4} defaultValue={episode?.study_notes} maxLength={8000} /></label>
+
+        <div className="studio-nb-paste-bar">
+          <button
+            type="button"
+            className="studio-nb-link-btn"
+            aria-expanded={showPasteBox}
+            onClick={() => { setShowPasteBox((v) => !v); setPasteNotice(""); }}
+          >
+            <Sparkles size={15} /> {showPasteBox ? "Skjul NotebookLM-import" : "Lim inn studieguide / notater fra NotebookLM"}
+          </button>
+          {pasteNotice && <span className="studio-nb-copied">{pasteNotice}</span>}
+        </div>
+        {showPasteBox && (
+          <div className="studio-nb-paste-box">
+            <textarea
+              rows={4}
+              value={rawPaste}
+              onChange={(e) => setRawPaste(e.target.value)}
+              placeholder="Lim inn tekst fra Study Guide, Briefing Doc eller chatten i NotebookLM …"
+            />
+            <div className="studio-nb-paste-actions">
+              <small>Markdown ryddes automatisk og fyller ut beskrivelse + nøkkelpunkter.</small>
+              <button type="button" className="studio-button" disabled={!rawPaste.trim()} onClick={applyNotebookPaste}>
+                Fyll ut automatisk
+              </button>
+            </div>
+          </div>
+        )}
+
+        <label>Beskrivelse<textarea name="description" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1600} /></label>
+        <label>Nøkkelpunkter og refleksjonsspørsmål<textarea name="study_notes" rows={4} value={studyNotes} onChange={(e) => setStudyNotes(e.target.value)} maxLength={8000} /></label>
         {episode && current && (
           <section className="studio-replace" aria-label="Lyd eller video">
             <div className="studio-replace-current">
@@ -381,7 +488,7 @@ export function EpisodeDialog({
         )}
         {progress !== null && (
           <div className="studio-upload-progress" role="status">
-            <span>{progress === 100 ? (episode ? "Lagrer endringene" : "Lagrer episoden") : "Laster opp"}</span>
+            <span>{progress === 100 ? (episode ? "Lagrer endringene" : "Lagrer episoden") : (uploadStage || "Laster opp")}</span>
             <span>{progress} %</span>
             <progress value={progress} max={100} aria-label="Opplasting" />
           </div>

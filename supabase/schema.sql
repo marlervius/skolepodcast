@@ -22,6 +22,7 @@ create table if not exists public.courses (
   description text not null default '',
   code text not null unique,
   accent_color text not null default '#C0563B',
+  notebook_url text not null default '',
   created_at timestamptz not null default now()
 );
 
@@ -30,9 +31,13 @@ create table if not exists public.topics (
   course_id text not null references public.courses(id) on delete cascade,
   title text not null,
   description text not null default '',
+  notebook_url text not null default '',
   sort_order int not null default 0,
   created_at timestamptz not null default now()
 );
+
+alter table public.courses add column if not exists notebook_url text not null default '';
+alter table public.topics add column if not exists notebook_url text not null default '';
 
 create table if not exists public.episodes (
   id text primary key,
@@ -65,7 +70,8 @@ create or replace view public.course_summaries with (security_invoker = true) as
 select c.id, c.teacher_id, t.name as teacher_name, c.title, c.subject, c.class_label, c.description,
        c.code, c.accent_color, c.created_at,
        (select count(*) from public.episodes e where e.course_id = c.id)::int as episode_count,
-       (select count(*) from public.topics tp where tp.course_id = c.id)::int as topic_count
+       (select count(*) from public.topics tp where tp.course_id = c.id)::int as topic_count,
+       c.notebook_url
 from public.courses c join public.teachers t on t.id = c.teacher_id;
 
 -- Lyd og video. Bucketen er offentlig for lesing, så elevene kan strømme filene.
