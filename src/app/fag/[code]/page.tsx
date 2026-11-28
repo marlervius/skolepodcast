@@ -1,25 +1,47 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CourseViewClient } from "@/components/CourseViewClient";
+import { CachedCourseView, CourseViewClient } from "@/components/CourseViewClient";
 import { getCourseByCode } from "@/lib/db";
-import { normalizeCode } from "@/lib/types";
+import { normalizeCode, toPublicCourse, type Course } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ code: string }> };
 
-async function load(code: string) {
-  const normalized = normalizeCode(decodeURIComponent(code));
-  return normalized ? getCourseByCode(normalized) : null;
+type LoadResult =
+  | { status: "found"; course: Course }
+  | { status: "not_found" }
+  | { status: "offline"; code: string };
+
+async function load(rawCode: string): Promise<LoadResult> {
+  const normalized = normalizeCode(decodeURIComponent(rawCode));
+  if (!normalized) return { status: "not_found" };
+  try {
+    const course = await getCourseByCode(normalized);
+    return course ? { status: "found", course: toPublicCourse(course) } : { status: "not_found" };
+  } catch (error) {
+    console.error("[course-page]", error);
+    return { status: "offline", code: normalized };
+  }
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const course = await load((await params).code);
-  return course ? { title: course.title, description: course.description || `${course.subject} med ${course.teacher_name}` } : { title: "Fant ikke fagrommet" };
+  const result = await load((await params).code);
+  if (result.status === "found") {
+    const { course } = result;
+    return {
+      title: course.title,
+      description: course.description || `${course.subject} med ${course.teacher_name}`,
+    };
+  }
+  return { title: result.status === "offline" ? "Lytterom" : "Fant ikke fagrommet" };
 }
 
 export default async function CoursePage({ params }: Props) {
-  const course = await load((await params).code);
-  if (!course) {
+  const result = await load((await params).code);
+  if (result.status === "offline") {
+    return <CachedCourseView code={result.code} />;
+  }
+  if (result.status === "not_found") {
     return (
       <div className="page">
         <div className="empty empty--page">
@@ -30,5 +52,5 @@ export default async function CoursePage({ params }: Props) {
       </div>
     );
   }
-  return <CourseViewClient course={course} />;
+  return <CourseViewClient course={result.course} />;
 }

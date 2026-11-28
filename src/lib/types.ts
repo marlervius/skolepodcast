@@ -100,11 +100,37 @@ export function parseEmbedUrl(input: string): string | null {
   return null;
 }
 
+export function toPublicCourse<T extends CourseSummary>(course: T): T {
+  const clean: T = { ...course, teacher_id: "" };
+  delete clean.notebook_url;
+  if ("topics" in clean && Array.isArray((clean as unknown as Course).topics)) {
+    (clean as unknown as Course).topics = (clean as unknown as Course).topics.map((topic) => {
+      const cleanTopic = { ...topic };
+      delete cleanTopic.notebook_url;
+      return cleanTopic;
+    });
+  }
+  return clean;
+}
+
 export function formatDuration(seconds: number) {
   if (!Number.isFinite(seconds) || seconds <= 0) return "";
   const total = Math.round(seconds);
-  const minutes = Math.round(total / 60);
   if (total < 60) return `${total} sek`;
-  if (minutes < 60) return `${minutes} min`;
-  return `${Math.floor(minutes / 60)} t ${minutes % 60} min`;
+  const totalMinutes = Math.max(1, Math.round(total / 60));
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+  const hours = Math.floor(totalMinutes / 60);
+  const remMinutes = totalMinutes % 60;
+  return remMinutes > 0 ? `${hours} t ${remMinutes} min` : `${hours} t`;
+}
+
+/** Formaterer sekunder som tidskode, f.eks. «4:05» eller «1:02:03». */
+export function formatTimecode(value: number) {
+  if (!Number.isFinite(value) || value < 0) return "0:00";
+  const seconds = Math.floor(value);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  const remainder = String(seconds % 60).padStart(2, "0");
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${remainder}`;
+  return `${minutes}:${remainder}`;
 }

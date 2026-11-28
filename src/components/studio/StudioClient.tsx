@@ -1,18 +1,40 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowDown, ArrowUp, BookOpen, ExternalLink, Eye, FileAudio, FileVideo, Headphones, LoaderCircle, LogOut, Mic, Pencil,
   QrCode, Sparkles, Trash2, UploadCloud, Youtube,
 } from "lucide-react";
+import { ACCEPTED_MEDIA_FILES, MEDIA_EXTENSION_REGEX } from "@/lib/media";
 import type { Course, CourseSummary, Episode, Teacher, Topic } from "@/lib/types";
 import { durationLabel, messageFrom, studioJson, studioRequest } from "./api";
-import { NotebookBatchImportDialog, NotebookToolkitDialog } from "./NotebookDialogs";
-import { PodcastCreatorDialog } from "./PodcastCreatorDialog";
 import { AddButton, CourseDialog, DeleteDialog, EpisodeDialog, PreviewDialog, ShareDialog, TopicDialog } from "./StudioDialogs";
+import { StudioModal } from "./StudioModal";
 
-const mediaExtensions = /\.(mp3|m4a|wav|ogg|aac|flac|mp4|webm|mov)$/i;
+function LazyModalFallback({ close }: { close: () => void }) {
+  return (
+    <StudioModal title="Laster verktøy …" close={close}>
+      <div className="studio-loading" style={{ padding: "36px 16px" }}>
+        <LoaderCircle className="studio-spinner" size={24} /> Laster …
+      </div>
+    </StudioModal>
+  );
+}
+
+const PodcastCreatorDialog = dynamic(
+  () => import("./PodcastCreatorDialog").then((m) => m.PodcastCreatorDialog),
+  { ssr: false, loading: () => <LazyModalFallback close={() => undefined} /> },
+);
+const NotebookBatchImportDialog = dynamic(
+  () => import("./NotebookDialogs").then((m) => m.NotebookBatchImportDialog),
+  { ssr: false, loading: () => <LazyModalFallback close={() => undefined} /> },
+);
+const NotebookToolkitDialog = dynamic(
+  () => import("./NotebookDialogs").then((m) => m.NotebookToolkitDialog),
+  { ssr: false, loading: () => <LazyModalFallback close={() => undefined} /> },
+);
 
 type DialogState =
   | { kind: "course"; course?: Course }
@@ -122,12 +144,13 @@ function Studio({ teacher, maxUploadMb, geminiConfigured, onLogout }: { teacher:
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
+  const [moving, setMoving] = useState(false);
   const [dropTopicId, setDropTopicId] = useState<string | null>(null);
   const batchPicker = useRef<HTMLInputElement>(null);
   const batchTargetTopic = useRef<Topic | null>(null);
 
   function handleTopicFiles(topic: Topic, fileList: FileList | File[]) {
-    const valid = Array.from(fileList).filter((file) => mediaExtensions.test(file.name));
+    const valid = Array.from(fileList).filter((file) => MEDIA_EXTENSION_REGEX.test(file.name));
     if (!valid.length) {
       setToast("Slipp lyd- eller videofiler (WAV, M4A, MP3, MP4 osv.) fra NotebookLM.");
       return;
@@ -181,11 +204,15 @@ function Studio({ teacher, maxUploadMb, geminiConfigured, onLogout }: { teacher:
   }
 
   async function move(endpoint: string, direction: "up" | "down") {
+    if (moving) return;
+    setMoving(true);
     try {
       await studioRequest(endpoint, studioJson("PATCH", { move: direction }));
       if (selectedId) await loadCourse(selectedId);
     } catch (failure) {
       setToast(messageFrom(failure));
+    } finally {
+      setMoving(false);
     }
   }
 
@@ -276,7 +303,7 @@ function Studio({ teacher, maxUploadMb, geminiConfigured, onLogout }: { teacher:
               hidden
               type="file"
               multiple
-              accept=".mp3,.m4a,.wav,.ogg,.aac,.flac,.mp4,.webm,.mov"
+              accept={ACCEPTED_MEDIA_FILES}
               ref={batchPicker}
               onChange={(event) => {
                 const target = batchTargetTopic.current;
@@ -339,8 +366,8 @@ function Studio({ teacher, maxUploadMb, geminiConfigured, onLogout }: { teacher:
                           <Sparkles size={16} />
                         </button>
                       )}
-                      <button className="studio-icon-button" disabled={topicIndex === 0} onClick={() => move(`/api/topics/${topic.id}`, "up")} aria-label="Flytt kapittel opp"><ArrowUp size={16} /></button>
-                      <button className="studio-icon-button" disabled={topicIndex === course.topics.length - 1} onClick={() => move(`/api/topics/${topic.id}`, "down")} aria-label="Flytt kapittel ned"><ArrowDown size={16} /></button>
+                      <button className="studio-icon-button" disabled={moving || topicIndex === 0} onClick={() => move(`/api/topics/${topic.id}`, "up")} aria-label="Flytt kapittel opp"><ArrowUp size={16} /></button>
+                      <button className="studio-icon-button" disabled={moving || topicIndex === course.topics.length - 1} onClick={() => move(`/api/topics/${topic.id}`, "down")} aria-label="Flytt kapittel ned"><ArrowDown size={16} /></button>
                       <button className="studio-icon-button" onClick={() => setDialog({ kind: "topic", topic })} aria-label="Rediger kapittel"><Pencil size={16} /></button>
                       <button
                         className="studio-icon-button"
@@ -370,8 +397,8 @@ function Studio({ teacher, maxUploadMb, geminiConfigured, onLogout }: { teacher:
                             </div>
                             <div className="studio-row-actions">
                               <button className="studio-icon-button" onClick={() => setDialog({ kind: "preview", episode })} aria-label="Testavspilling"><Headphones size={16} /></button>
-                              <button className="studio-icon-button" disabled={episodeIndex === 0} onClick={() => move(`/api/episodes/${episode.id}`, "up")} aria-label="Flytt episode opp"><ArrowUp size={16} /></button>
-                              <button className="studio-icon-button" disabled={episodeIndex === topic.episodes.length - 1} onClick={() => move(`/api/episodes/${episode.id}`, "down")} aria-label="Flytt episode ned"><ArrowDown size={16} /></button>
+                              <button className="studio-icon-button" disabled={moving || episodeIndex === 0} onClick={() => move(`/api/episodes/${episode.id}`, "up")} aria-label="Flytt episode opp"><ArrowUp size={16} /></button>
+                              <button className="studio-icon-button" disabled={moving || episodeIndex === topic.episodes.length - 1} onClick={() => move(`/api/episodes/${episode.id}`, "down")} aria-label="Flytt episode ned"><ArrowDown size={16} /></button>
                               <button className="studio-icon-button" onClick={() => setDialog({ kind: "episode", topic, episode })} aria-label="Rediger episode"><Pencil size={16} /></button>
                               <button
                                 className="studio-icon-button"

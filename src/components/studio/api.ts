@@ -1,3 +1,5 @@
+import { formatTimecode } from "@/lib/types";
+
 export async function studioRequest<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     cache: "no-store",
@@ -55,11 +57,4 @@ export function messageFrom(error: unknown) {
   return error instanceof Error ? error.message : "Noe gikk galt. Prøv igjen.";
 }
 
-export function durationLabel(seconds: number) {
-  const total = Math.floor(seconds);
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor(total / 60) % 60;
-  const remainder = String(total % 60).padStart(2, "0");
-  if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${remainder}`;
-  return `${minutes}:${remainder}`;
-}
+export const durationLabel = formatTimecode;

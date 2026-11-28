@@ -6,22 +6,9 @@ import {
 } from "@/lib/db";
 import { MAX_UPLOAD_MB } from "@/lib/limits";
 import { parseNotebookUrl } from "@/lib/notebooklm";
-import { DEFAULT_COLOR, isCourseColor, normalizeCode, type Course, type CourseSummary } from "@/lib/types";
+import { DEFAULT_COLOR, isCourseColor, normalizeCode, toPublicCourse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-
-function stripPrivateFields<T extends CourseSummary>(course: T): T {
-  const clean = { ...course };
-  delete clean.notebook_url;
-  if ("topics" in clean && Array.isArray((clean as unknown as Course).topics)) {
-    (clean as unknown as Course).topics = (clean as unknown as Course).topics.map((topic) => {
-      const cleanTopic = { ...topic };
-      delete cleanTopic.notebook_url;
-      return cleanTopic;
-    });
-  }
-  return clean;
-}
 
 export async function GET(request: Request) {
   return handle(async () => {
@@ -31,11 +18,11 @@ export async function GET(request: Request) {
       // full=1 tar med kapitler og episoder (samme innhold som elevsiden /fag/KODE viser).
       const course = !code ? null : params.get("full") === "1" ? await getCourseByCode(code) : await getCourseSummaryByCode(code);
       if (!course) throw new HttpError(404, "Fant ikke noe fagrom med denne klassekoden.");
-      return NextResponse.json({ course: stripPrivateFields(course) });
+      return NextResponse.json({ course: toPublicCourse(course) });
     }
     if (params.has("codes")) {
       const codes = [...new Set((params.get("codes") || "").split(",").map(normalizeCode).filter(Boolean))].slice(0, 50);
-      const courses = (await getCourseSummariesByCodes(codes)).map(stripPrivateFields);
+      const courses = (await getCourseSummariesByCodes(codes)).map(toPublicCourse);
       return NextResponse.json({ courses });
     }
     if (params.get("mine") === "1") {

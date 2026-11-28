@@ -15,7 +15,13 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=()" },
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'self'; frame-src 'self' https://www.youtube-nocookie.com https://youtube-nocookie.com https://player.vimeo.com; object-src 'none'; base-uri 'self'",
+          },
         ],
       },
     ];

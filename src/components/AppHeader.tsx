@@ -45,7 +45,9 @@ export function AppHeader() {
         </Link>
         <nav className="app-nav" aria-label="Hovedmeny">
           <Link href="/" aria-current={!studio ? "page" : undefined}>Mine fag</Link>
-          <Link href="/studio" aria-current={studio ? "page" : undefined}>Lærer</Link>
+          <Link href="/studio" className={!studio ? "nav-subtle" : undefined} aria-current={studio ? "page" : undefined}>
+            {studio ? "Lærerstudio" : "For lærere"}
+          </Link>
           <button type="button" className="icon-button" onClick={toggle} aria-label={theme === "dark" ? "Bytt til lys modus" : "Bytt til mørk modus"}>
             {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
           </button>

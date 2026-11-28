@@ -21,7 +21,7 @@ export async function POST(request: Request) {
       limitAttempts(`token-ip:${clientIp(request)}`, 30, 15 * 60_000);
       limitAttempts(`token:${email}`, 10, 15 * 60_000);
       const found = email ? await findTeacherByEmail(email) : null;
-      if (!found || !verifyPassword(password, found.password_hash)) {
+      if (!found || !(await verifyPassword(password, found.password_hash))) {
         throw new HttpError(401, "Feil e-post eller passord.");
       }
       const teacher = { id: found.id, name: found.name, email: found.email, created_at: found.created_at };

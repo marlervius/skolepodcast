@@ -244,12 +244,20 @@ async function move(table: "topics" | "episodes", parentColumn: "course_id" | "t
   const client = await db();
   const item: Record<string, string> | null = check(await client.from(table).select(parentColumn).eq("id", id).maybeSingle());
   if (!item) return;
-  const siblings: { id: string }[] = check(await client.from(table).select("id").eq(parentColumn, item[parentColumn]).order("sort_order").order("created_at"));
+  const siblings: { id: string; sort_order: number }[] = check(
+    await client.from(table).select("id, sort_order").eq(parentColumn, item[parentColumn]).order("sort_order").order("created_at"),
+  );
   const index = siblings.findIndex((sibling) => sibling.id === id);
   const target = direction === "up" ? index - 1 : index + 1;
   if (index < 0 || target < 0 || target >= siblings.length) return;
-  [siblings[index], siblings[target]] = [siblings[target], siblings[index]];
-  await Promise.all(siblings.map(async (sibling, order) => check(await client.from(table).update({ sort_order: order }).eq("id", sibling.id))));
+  const reordered = [...siblings];
+  [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+  const changed = reordered
+    .map((sibling, order) => ({ id: sibling.id, nextOrder: order, prevOrder: sibling.sort_order }))
+    .filter((entry) => entry.prevOrder !== entry.nextOrder);
+  await Promise.all(
+    changed.map(async (entry) => check(await client.from(table).update({ sort_order: entry.nextOrder }).eq("id", entry.id))),
+  );
 }
 export async function moveTopic(id: string, direction: "up" | "down") {
   await move("topics", "course_id", id, direction);

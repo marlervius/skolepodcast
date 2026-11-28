@@ -2,68 +2,25 @@
 
 import {
   BookOpen, Check, Copy, ExternalLink, FileAudio, FileVideo, Link2, LoaderCircle,
-  Plus, QrCode, Sparkles, Trash2, UploadCloud, X,
+  Plus, QrCode, Sparkles, Trash2, UploadCloud,
 } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { StudyNotesView } from "@/components/StudyNotesView";
+import {
+  ACCEPTED_MEDIA_FILES, AUDIO_EXTENSION_REGEX, pauseMainPlayer,
+  readMediaDuration, VIDEO_EXTENSION_REGEX,
+} from "@/lib/media";
 import { cleanNotebookFilename, parseNotebookStudyNotes } from "@/lib/notebooklm";
-import { COURSE_COLORS, DEFAULT_COLOR, type Course, type Episode, type Topic } from "@/lib/types";
+import { COURSE_COLORS, DEFAULT_COLOR, parseEmbedUrl, type Course, type Episode, type Topic } from "@/lib/types";
 import { durationLabel, messageFrom, studioJson, studioRequest, uploadMedia } from "./api";
-import { compressAudioForUpload, formatBytes, isWavFile } from "./audioCompress";
+import { formatBytes, isWavFile } from "./audioCompress";
+import { StudioModal } from "./StudioModal";
 
 type DialogProps = {
   close: () => void;
   saved: (message: string, course?: Course) => void | Promise<void>;
 };
-
-function Dialog({
-  title, close, busy = false, wide = false, children,
-}: {
-  title: string;
-  close: () => void;
-  busy?: boolean;
-  wide?: boolean;
-  children: ReactNode;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const element = dialog.current;
-    element?.showModal();
-    return () => element?.close();
-  }, []);
-
-  return (
-    <dialog
-      ref={dialog}
-      aria-labelledby="studio-dialog-heading"
-      className={`studio-dialog${wide ? " studio-dialog--wide" : ""}`}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) close();
-      }}
-      onClick={(event) => {
-        if (!busy && event.target === event.currentTarget) close();
-      }}
-    >
-      <div className="studio-dialog-body">
-        <header className="studio-dialog-top">
-          <h2 id="studio-dialog-heading">{title}</h2>
-          <button
-            type="button"
-            className="studio-icon-button"
-            onClick={close}
-            disabled={busy}
-            aria-label="Lukk"
-          >
-            <X size={20} />
-          </button>
-        </header>
-        {children}
-      </div>
-    </dialog>
-  );
-}
 
 function FormActions({
   busy, close, action, danger = false, disabled = false,
@@ -129,7 +86,7 @@ export function CourseDialog({ course, close, saved }: DialogProps & { course?: 
   }
 
   return (
-    <Dialog title={course ? "Rediger fagrom" : "Nytt fagrom"} busy={busy} close={close}>
+    <StudioModal title={course ? "Rediger fagrom" : "Nytt fagrom"} busy={busy} close={close}>
       <form className="studio-form" onSubmit={submit}>
         <label>Tittel<input name="title" defaultValue={course?.title} placeholder="F.eks. Historie VG3" required maxLength={100} /></label>
         <div className="studio-form-row">
@@ -164,7 +121,7 @@ export function CourseDialog({ course, close, saved }: DialogProps & { course?: 
         {error && <p className="studio-error" role="alert">{error}</p>}
         <FormActions busy={busy} close={close} action={course ? "Lagre endringer" : "Opprett fagrom"} />
       </form>
-    </Dialog>
+    </StudioModal>
   );
 }
 
@@ -184,7 +141,7 @@ export function TopicDialog({ course, topic, close, saved }: DialogProps & { cou
   }
 
   return (
-    <Dialog title={topic ? "Rediger kapittel" : "Nytt kapittel"} busy={busy} close={close}>
+    <StudioModal title={topic ? "Rediger kapittel" : "Nytt kapittel"} busy={busy} close={close}>
       <form className="studio-form" onSubmit={submit}>
         <label>Tittel<input name="title" defaultValue={topic?.title} placeholder="F.eks. Mellomkrigstiden" required maxLength={100} /></label>
         <label>Beskrivelse<textarea name="description" defaultValue={topic?.description} rows={3} maxLength={1200} /></label>
@@ -196,38 +153,8 @@ export function TopicDialog({ course, topic, close, saved }: DialogProps & { cou
         {error && <p className="studio-error" role="alert">{error}</p>}
         <FormActions busy={busy} close={close} action={topic ? "Lagre endringer" : "Opprett kapittel"} />
       </form>
-    </Dialog>
+    </StudioModal>
   );
-}
-
-const acceptedFiles = ".mp3,.m4a,.wav,.ogg,.aac,.flac,.mp4,.webm,.mov";
-const audioExtensions = /\.(mp3|m4a|wav|ogg|aac|flac)$/i;
-const videoExtensions = /\.(mp4|webm|mov)$/i;
-
-function readDuration(file: File) {
-  return new Promise<number>((resolve) => {
-    const element = document.createElement(videoExtensions.test(file.name) ? "video" : "audio");
-    const source = URL.createObjectURL(file);
-    let finished = false;
-    const timer = window.setTimeout(() => complete(0), 5000);
-
-    function complete(seconds: number) {
-      if (finished) return;
-      finished = true;
-      window.clearTimeout(timer);
-      element.onloadedmetadata = null;
-      element.onerror = null;
-      element.removeAttribute("src");
-      element.load();
-      URL.revokeObjectURL(source);
-      resolve(Number.isFinite(seconds) ? Math.round(seconds) : 0);
-    }
-
-    element.preload = "metadata";
-    element.onloadedmetadata = () => complete(element.duration);
-    element.onerror = () => complete(0);
-    element.src = source;
-  });
 }
 
 const currentMedia = {
@@ -261,7 +188,7 @@ export function EpisodeDialog({
 
   function chooseFile(selection: File) {
     setFileError("");
-    if (!audioExtensions.test(selection.name) && !videoExtensions.test(selection.name)) {
+    if (!AUDIO_EXTENSION_REGEX.test(selection.name) && !VIDEO_EXTENSION_REGEX.test(selection.name)) {
       setFileError("Velg en lyd- eller videofil i et av formatene som er oppgitt.");
       return;
     }
@@ -274,7 +201,7 @@ export function EpisodeDialog({
     const filename = cleanNotebookFilename(selection.name);
     if (!title.trim() || title === lastFileTitle) setTitle(filename);
     setLastFileTitle(filename);
-    duration.current = readDuration(selection);
+    duration.current = readMediaDuration(selection);
   }
 
   useEffect(() => {
@@ -318,6 +245,7 @@ export function EpisodeDialog({
           if (compressWav && isWavFile(file)) {
             setUploadStage("Komprimerer WAV-lyd fra NotebookLM …");
             setProgress(0);
+            const { compressAudioForUpload } = await import("./audioCompress");
             const result = await compressAudioForUpload(file, setUploadStage);
             fileToUpload = result.file;
             measuredDuration = result.durationSeconds;
@@ -359,7 +287,7 @@ export function EpisodeDialog({
     duration.current = Promise.resolve(0);
   }
 
-  const FileIcon = file && videoExtensions.test(file.name) ? FileVideo : FileAudio;
+  const FileIcon = file && VIDEO_EXTENSION_REGEX.test(file.name) ? FileVideo : FileAudio;
   const current = episode ? currentMedia[episode.media_type] : null;
   const wavSelected = Boolean(file && isWavFile(file));
 
@@ -390,7 +318,7 @@ export function EpisodeDialog({
             <input
               hidden
               type="file"
-              accept={acceptedFiles}
+              accept={ACCEPTED_MEDIA_FILES}
               ref={filePicker}
               disabled={busy}
               onChange={(event) => {
@@ -424,7 +352,7 @@ export function EpisodeDialog({
   );
 
   return (
-    <Dialog title={episode ? "Rediger episode" : "Ny episode"} busy={busy} close={close}>
+    <StudioModal title={episode ? "Rediger episode" : "Ny episode"} busy={busy} close={close}>
       <form className="studio-form" onSubmit={submit}>
         {!episode && mediaFields}
         <label>Tittel<input name="title" value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={140} /></label>
@@ -496,7 +424,7 @@ export function EpisodeDialog({
         {error && <p className="studio-error" role="alert">{error}</p>}
         <FormActions busy={busy} close={close} action={episode ? "Lagre endringer" : "Publiser episode"} />
       </form>
-    </Dialog>
+    </StudioModal>
   );
 }
 
@@ -519,7 +447,7 @@ export function ShareDialog({ course, close }: { course: Course; close: () => vo
   }
 
   return (
-    <Dialog title="Del med klassen" close={close} wide>
+    <StudioModal title="Del med klassen" close={close} wide>
       <div className="studio-share">
         <div className="studio-share-description">
           <QrCode size={22} />
@@ -540,32 +468,50 @@ export function ShareDialog({ course, close }: { course: Course; close: () => vo
         </div>
         {copyState === "fallback" && <p role="status">Lenken er markert. Kopier den med tastaturet.</p>}
       </div>
-    </Dialog>
+    </StudioModal>
   );
 }
 
 export function PreviewDialog({ episode, close }: { episode: Episode; close: () => void }) {
   const [error, setError] = useState(false);
+  const safeEmbed = episode.media_type === "embed" ? parseEmbedUrl(episode.embed_url || episode.media_url) : null;
+
+  useEffect(() => {
+    pauseMainPlayer();
+  }, []);
 
   return (
-    <Dialog title="Testavspilling" close={close} wide>
+    <StudioModal title="Testavspilling" close={close} wide>
       <section className="studio-preview">
         <h3>{episode.title}</h3>
         {episode.description && <p>{episode.description}</p>}
-        {episode.media_type === "audio" && <audio src={episode.media_url} controls preload="metadata" onError={() => setError(true)} />}
-        {episode.media_type === "video" && <video src={episode.media_url} controls playsInline preload="metadata" onError={() => setError(true)} />}
+        {episode.media_type === "audio" && (
+          <audio src={episode.media_url} controls preload="metadata" onPlay={pauseMainPlayer} onError={() => setError(true)} />
+        )}
+        {episode.media_type === "video" && (
+          <video src={episode.media_url} controls playsInline preload="metadata" onPlay={pauseMainPlayer} onError={() => setError(true)} />
+        )}
         {episode.media_type === "embed" && (
-          <iframe src={episode.embed_url} title={episode.title} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
+          safeEmbed ? (
+            <iframe src={safeEmbed} title={episode.title} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen />
+          ) : (
+            <p className="studio-error">Videolenken er ugyldig eller støttes ikke.</p>
+          )
         )}
         {error && <p className="studio-error" role="alert">Nettleseren kunne ikke spille av denne filen.</p>}
-        {episode.study_notes && (
+        {episode.study_notes?.trim() && (
           <div className="studio-preview-notes">
             <BookOpen size={18} />
-            <div><strong>Nøkkelpunkter og refleksjonsspørsmål</strong><p>{episode.study_notes}</p></div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong>Nøkkelpunkter og refleksjonsspørsmål</strong>
+              <div style={{ marginTop: 8 }}>
+                <StudyNotesView notes={episode.study_notes} />
+              </div>
+            </div>
           </div>
         )}
       </section>
-    </Dialog>
+    </StudioModal>
   );
 }
 
@@ -576,7 +522,7 @@ export function DeleteDialog({
   const result = { fagrom: "Fagrommet", kapittel: "Kapittelet", episode: "Episoden" }[kind];
 
   return (
-    <Dialog title={`Slett ${kind}`} close={close} busy={busy}>
+    <StudioModal title={`Slett ${kind}`} close={close} busy={busy}>
       <form className="studio-form" onSubmit={(event) => {
         event.preventDefault();
         void run(async () => {
@@ -589,7 +535,7 @@ export function DeleteDialog({
         {error && <p className="studio-error" role="alert">{error}</p>}
         <FormActions busy={busy} close={close} action={`Slett ${kind}`} danger />
       </form>
-    </Dialog>
+    </StudioModal>
   );
 }
 

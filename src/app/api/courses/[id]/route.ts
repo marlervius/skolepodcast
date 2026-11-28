@@ -3,7 +3,7 @@ import { currentTeacher, handle, HttpError, readJson, requireCourseOwner, text }
 import { deleteCourse, getCourse, isCodeTaken, updateCourse, type CourseInput } from "@/lib/db";
 import { parseNotebookUrl } from "@/lib/notebooklm";
 import { deleteMediaFiles } from "@/lib/storage";
-import { isCourseColor, normalizeCode } from "@/lib/types";
+import { isCourseColor, normalizeCode, toPublicCourse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
@@ -14,16 +14,7 @@ export async function GET(_request: Request, { params }: Context) {
     if (!course) throw new HttpError(404, "Fant ikke fagrommet.");
     const viewer = await currentTeacher().catch(() => null);
     if (viewer?.id !== course.teacher_id) {
-      const publicCourse = {
-        ...course,
-        topics: course.topics.map((topic) => {
-          const clean = { ...topic };
-          delete clean.notebook_url;
-          return clean;
-        }),
-      };
-      delete publicCourse.notebook_url;
-      return NextResponse.json({ course: publicCourse });
+      return NextResponse.json({ course: toPublicCourse(course) });
     }
     return NextResponse.json({ course });
   });

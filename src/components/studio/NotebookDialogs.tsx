@@ -2,82 +2,15 @@
 
 import {
   Check, Copy, ExternalLink, FileAudio, FileVideo, KeyRound, LoaderCircle,
-  Puzzle, Sparkles, Trash2, UploadCloud, X,
+  Puzzle, Sparkles, Trash2, UploadCloud,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { readMediaDuration, VIDEO_EXTENSION_REGEX } from "@/lib/media";
 import { cleanNotebookFilename, NOTEBOOKLM_PROMPTS } from "@/lib/notebooklm";
 import type { Course, Topic } from "@/lib/types";
 import { messageFrom, studioJson, studioRequest, uploadMedia } from "./api";
 import { compressAudioForUpload, formatBytes, isWavFile } from "./audioCompress";
-
-const videoExtensions = /\.(mp4|webm|mov)$/i;
-
-function readMediaDuration(file: File) {
-  return new Promise<number>((resolve) => {
-    const element = document.createElement(videoExtensions.test(file.name) ? "video" : "audio");
-    const source = URL.createObjectURL(file);
-    let finished = false;
-    const timer = window.setTimeout(() => complete(0), 5000);
-    function complete(seconds: number) {
-      if (finished) return;
-      finished = true;
-      window.clearTimeout(timer);
-      element.onloadedmetadata = null;
-      element.onerror = null;
-      element.removeAttribute("src");
-      element.load();
-      URL.revokeObjectURL(source);
-      resolve(Number.isFinite(seconds) ? Math.round(seconds) : 0);
-    }
-    element.preload = "metadata";
-    element.onloadedmetadata = () => complete(element.duration);
-    element.onerror = () => complete(0);
-    element.src = source;
-  });
-}
-
-function Modal({
-  title, close, busy = false, wide = false, children,
-}: {
-  title: string;
-  close: () => void;
-  busy?: boolean;
-  wide?: boolean;
-  children: React.ReactNode;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const element = ref.current;
-    element?.showModal();
-    return () => element?.close();
-  }, []);
-
-  return (
-    <dialog
-      ref={ref}
-      aria-labelledby="nb-dialog-heading"
-      className={`studio-dialog${wide ? " studio-dialog--wide" : ""}`}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) close();
-      }}
-      onClick={(event) => {
-        if (!busy && event.target === event.currentTarget) close();
-      }}
-    >
-      <div className="studio-dialog-body">
-        <header className="studio-dialog-top">
-          <h2 id="nb-dialog-heading">{title}</h2>
-          <button type="button" className="studio-icon-button" onClick={close} disabled={busy} aria-label="Lukk">
-            <X size={20} />
-          </button>
-        </header>
-        {children}
-      </div>
-    </dialog>
-  );
-}
+import { StudioModal } from "./StudioModal";
 
 /* ---------- NotebookLM-verktøykasse (prompts + Chrome-utvidelse) ---------- */
 
@@ -135,7 +68,7 @@ export function NotebookToolkitDialog({
   }
 
   return (
-    <Modal title="NotebookLM-integrasjon" close={close} wide>
+    <StudioModal title="NotebookLM-integrasjon" close={close} wide>
       <div className="studio-nb">
         <div className="studio-nb-hero">
           <div>
@@ -252,7 +185,7 @@ export function NotebookToolkitDialog({
           </div>
         )}
       </div>
-    </Modal>
+    </StudioModal>
   );
 }
 
@@ -362,7 +295,7 @@ export function NotebookBatchImportDialog({
   }
 
   return (
-    <Modal title={`Importer til «${topic.title}»`} busy={busy} close={close} wide>
+    <StudioModal title={`Importer til «${topic.title}»`} busy={busy} close={close} wide>
       <div className="studio-form">
         <p className="studio-muted" style={{ marginTop: 0 }}>
           Juster titlene om ønskelig før du publiserer. Alle episodene legges nederst i kapittelet.
@@ -380,7 +313,7 @@ export function NotebookBatchImportDialog({
 
         <ul className="studio-nb-batch">
           {items.map((item) => {
-            const Icon = videoExtensions.test(item.file.name) ? FileVideo : FileAudio;
+            const Icon = VIDEO_EXTENSION_REGEX.test(item.file.name) ? FileVideo : FileAudio;
             return (
               <li key={item.id} className={`studio-nb-batch-item studio-nb-batch-item--${item.status}`}>
                 <span className="studio-episode-icon"><Icon size={18} /></span>
@@ -427,6 +360,6 @@ export function NotebookBatchImportDialog({
           </button>
         </div>
       </div>
-    </Modal>
+    </StudioModal>
   );
 }

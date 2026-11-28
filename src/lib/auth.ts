@@ -42,13 +42,39 @@ export function readSessionToken(token: string | undefined): string | null {
   return teacherId;
 }
 
-export async function currentTeacher(): Promise<Teacher | null> {
-  const store = await cookies();
-  let token = store.get(SESSION_COOKIE)?.value;
-  if (!token) {
-    const authHeader = (await headers()).get("authorization");
-    if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7).trim();
+function isTrustedCookieContext(reqHeaders: Headers): boolean {
+  const secFetchSite = reqHeaders.get("sec-fetch-site");
+  if (secFetchSite === "cross-site") return false;
+
+  const origin = reqHeaders.get("origin");
+  if (!origin) return true;
+  if (origin === "null") return false;
+
+  const expectedHost = (reqHeaders.get("x-forwarded-host") || reqHeaders.get("host") || "")
+    .split(",")[0]
+    ?.trim()
+    .toLowerCase();
+  if (!expectedHost) return false;
+
+  try {
+    return new URL(origin).host.toLowerCase() === expectedHost;
+  } catch {
+    return false;
   }
+}
+
+export async function currentTeacher(): Promise<Teacher | null> {
+  const reqHeaders = await headers();
+  const authHeader = reqHeaders.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const id = readSessionToken(authHeader.slice(7).trim());
+    return id ? await getTeacher(id) : null;
+  }
+
+  if (!isTrustedCookieContext(reqHeaders)) return null;
+
+  const store = await cookies();
+  const token = store.get(SESSION_COOKIE)?.value;
   const id = readSessionToken(token);
   return id ? await getTeacher(id) : null;
 }

@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     if (password.length < 8) throw new HttpError(400, "Passordet må ha minst 8 tegn.");
     if (password.length > 200) throw new HttpError(400, "Passordet er for langt.");
     if (await findTeacherByEmail(email)) throw new HttpError(409, "Det finnes allerede en konto med denne e-postadressen.");
-    const teacher = await createTeacher(name, email, hashPassword(password));
+    const teacher = await createTeacher(name, email, await hashPassword(password));
     return setSessionCookie(NextResponse.json({ teacher }, { status: 201 }), teacher.id);
   });
 }

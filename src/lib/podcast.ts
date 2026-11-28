@@ -14,10 +14,39 @@ export type PodcastTurn = {
   style?: string;
 };
 
+export type PodcastFactOrigin = "source" | "added";
+
+export type PodcastFactItem = {
+  claim: string;
+  origin: PodcastFactOrigin;
+  turn_numbers: number[];
+};
+
+export type PodcastTheoryItem = {
+  name: string;
+  explanation: string;
+  turn_numbers: number[];
+};
+
+export type PodcastThesisItem = {
+  statement: string;
+  perspectives?: string;
+  turn_numbers: number[];
+};
+
+export type PodcastAcademicOverview = {
+  summary: string;
+  facts: PodcastFactItem[];
+  theories: PodcastTheoryItem[];
+  theses: PodcastThesisItem[];
+  caveats: string[];
+};
+
 export type PodcastScript = {
   title: string;
   description: string;
   study_notes: string;
+  academic_overview?: PodcastAcademicOverview;
   turns: PodcastTurn[];
 };
 
@@ -297,4 +326,46 @@ export function parseDirectScript(
   }
 
   return turns;
+}
+
+/** Formaterer den faglige oversikten som ren tekst for kopiering eller deling med kollegaer. */
+export function formatAcademicOverviewText(title: string, overview: PodcastAcademicOverview): string {
+  const lines: string[] = [];
+  if (title.trim()) lines.push(`Faglig oversikt: ${title.trim()}`, "");
+  if (overview.summary) {
+    lines.push("HVA EPISODEN HANDLER OM", overview.summary, "");
+  }
+  if (overview.facts.length) {
+    lines.push("FAKTA OG SAKSOPPLYSNINGER");
+    for (const item of overview.facts) {
+      const originLabel = item.origin === "added" ? " [Lagt til av AI]" : " [Fra kilden]";
+      const refs = item.turn_numbers.length ? ` (replikk ${item.turn_numbers.map((n) => `#${n}`).join(", ")})` : "";
+      lines.push(`• ${item.claim}${originLabel}${refs}`);
+    }
+    lines.push("");
+  }
+  if (overview.theories.length) {
+    lines.push("TEORIER, MODELLER OG FAGBEGREPER");
+    for (const item of overview.theories) {
+      const refs = item.turn_numbers.length ? ` (replikk ${item.turn_numbers.map((n) => `#${n}`).join(", ")})` : "";
+      lines.push(`• ${item.name}: ${item.explanation}${refs}`);
+    }
+    lines.push("");
+  }
+  if (overview.theses.length) {
+    lines.push("TESER OG DRØFTINGER");
+    for (const item of overview.theses) {
+      const refs = item.turn_numbers.length ? ` (replikk ${item.turn_numbers.map((n) => `#${n}`).join(", ")})` : "";
+      lines.push(`• ${item.statement}${refs}`);
+      if (item.perspectives) lines.push(`  Perspektiver/nyanser: ${item.perspectives}`);
+    }
+    lines.push("");
+  }
+  if (overview.caveats.length) {
+    lines.push("FORENKLINGER OG SJEKKPUNKTER FOR FAGLÆRER");
+    for (const caveat of overview.caveats) {
+      lines.push(`• ${caveat}`);
+    }
+  }
+  return lines.join("\n").trim();
 }

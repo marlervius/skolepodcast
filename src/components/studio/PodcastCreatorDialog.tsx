@@ -2,9 +2,10 @@
 
 import {
   ArrowDown, ArrowLeft, ArrowUp, Check, Download, FileText, Headphones, Info,
-  LoaderCircle, Mic, Plus, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, X,
+  LoaderCircle, Mic, Plus, SlidersHorizontal, Sparkles, Trash2, Users, Volume2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { pauseMainPlayer } from "@/lib/media";
 import {
   chunkPodcastTurns,
   estimateDurationSeconds,
@@ -18,6 +19,7 @@ import {
   PODCAST_STYLES,
   PODCAST_VOICES,
   TURN_STYLES,
+  type PodcastAcademicOverview,
   type PodcastFormat,
   type PodcastLanguage,
   type PodcastLength,
@@ -29,8 +31,10 @@ import {
   type PodcastTurn,
 } from "@/lib/podcast";
 import type { Course, Topic } from "@/lib/types";
+import { AcademicOverviewPanel } from "./AcademicOverviewPanel";
 import { durationLabel, messageFrom, studioJson, studioRequest, uploadMedia } from "./api";
 import { compressAudioForUpload, formatBytes, pcmChunksToWavFile } from "./audioCompress";
+import { StudioModal } from "./StudioModal";
 
 type Step = "source" | "script" | "publish";
 
@@ -92,11 +96,12 @@ export function PodcastCreatorDialog({
   close: () => void;
   saved: (message: string, changed?: Course) => void | Promise<void>;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const textPickerRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const voiceCacheRef = useRef<Map<string, string>>(new Map());
   const sampleAudioRef = useRef<HTMLAudioElement | null>(null);
+  const turnRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const highlightTimerRef = useRef<number | null>(null);
 
   const [step, setStep] = useState<Step>("source");
   const [topicId, setTopicId] = useState(initialTopic?.id || course.topics[0]?.id || "");
@@ -115,11 +120,15 @@ export function PodcastCreatorDialog({
   const [sourceText, setSourceText] = useState("");
   const [instructions, setInstructions] = useState("");
 
-  // Manus-tilstand (Steg 2 & 3)
+  // Manus- og fagvurderingstilstand (Steg 2 & 3)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [studyNotes, setStudyNotes] = useState("");
   const [turns, setTurns] = useState<PodcastTurn[]>([]);
+  const [academicOverview, setAcademicOverview] = useState<PodcastAcademicOverview | null>(null);
+  const [overviewStale, setOverviewStale] = useState(false);
+  const [academicApproved, setAcademicApproved] = useState(false);
+  const [highlightedTurnId, setHighlightedTurnId] = useState<string | null>(null);
   const [showMetaInScript, setShowMetaInScript] = useState(false);
 
   // Generering & publisering
@@ -133,14 +142,13 @@ export function PodcastCreatorDialog({
   const busy = busyMode !== "idle";
 
   useEffect(() => {
-    const element = dialogRef.current;
-    element?.showModal();
+    const cache = voiceCacheRef.current;
     return () => {
       abortRef.current?.abort();
       sampleAudioRef.current?.pause();
-      for (const url of voiceCacheRef.current.values()) URL.revokeObjectURL(url);
-      voiceCacheRef.current.clear();
-      element?.close();
+      if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+      for (const url of cache.values()) URL.revokeObjectURL(url);
+      cache.clear();
     };
   }, []);
 
@@ -188,6 +196,7 @@ export function PodcastCreatorDialog({
     const voiceId = which === "A" ? voiceA : voiceB;
     const cacheKey = `${voiceId}:${language}:${quality}`;
     setError("");
+    pauseMainPlayer();
     sampleAudioRef.current?.pause();
 
     const cachedUrl = voiceCacheRef.current.get(cacheKey);
@@ -226,7 +235,7 @@ export function PodcastCreatorDialog({
     }
     setError("");
     setBusyMode("script");
-    setStatusLabel("Skriver podkastmanus med Gemini …");
+    setStatusLabel("Skriver manus og faglig oversikt med Gemini …");
     try {
       const result = await studioRequest<{ script: PodcastScript }>(
         "/api/studio/podcast/script",
@@ -250,6 +259,9 @@ export function PodcastCreatorDialog({
       setDescription(result.script.description);
       setStudyNotes(result.script.study_notes);
       setTurns(result.script.turns);
+      setAcademicOverview(result.script.academic_overview ?? null);
+      setOverviewStale(false);
+      setAcademicApproved(false);
       replaceGenerated(null);
       setStep("script");
     } catch (failure) {
@@ -291,6 +303,9 @@ export function PodcastCreatorDialog({
       if (result.script.description) setDescription(result.script.description);
       if (result.script.study_notes) setStudyNotes(result.script.study_notes);
       setTurns(result.script.turns);
+      if (result.script.academic_overview) setAcademicOverview(result.script.academic_overview);
+      setOverviewStale(false);
+      setAcademicApproved(false);
       replaceGenerated(null);
     } catch (failure) {
       setError(messageFrom(failure));
@@ -298,6 +313,92 @@ export function PodcastCreatorDialog({
       setBusyMode("idle");
       setStatusLabel("");
     }
+  }
+
+  async function applyAcademicCorrection(correction: string): Promise<boolean> {
+    if (!activeTurns.length || !correction.trim()) return false;
+    setError("");
+    setBusyMode("script");
+    setStatusLabel("Retter manus etter faglig tilbakemelding …");
+    try {
+      const result = await studioRequest<{ script: PodcastScript }>(
+        "/api/studio/podcast/script",
+        studioJson("POST", {
+          course_id: course.id,
+          topic_id: topicId,
+          source_text: sourceText,
+          format,
+          language,
+          length,
+          style,
+          level,
+          main_thread: mainThread,
+          focus_areas: focusAreas,
+          host_a_name: hostAName,
+          host_b_name: hostBName,
+          instructions,
+          correction: correction.trim(),
+          existing_title: title,
+          existing_turns: activeTurns.map((t) => ({ speaker: t.speaker, text: t.text })),
+        }),
+      );
+      setTitle(result.script.title);
+      if (result.script.description) setDescription(result.script.description);
+      if (result.script.study_notes) setStudyNotes(result.script.study_notes);
+      setTurns(result.script.turns);
+      if (result.script.academic_overview) setAcademicOverview(result.script.academic_overview);
+      setOverviewStale(false);
+      setAcademicApproved(false);
+      replaceGenerated(null);
+      return true;
+    } catch (failure) {
+      setError(messageFrom(failure));
+      return false;
+    } finally {
+      setBusyMode("idle");
+      setStatusLabel("");
+    }
+  }
+
+  async function refreshAcademicOverview() {
+    if (!activeTurns.length) return;
+    setError("");
+    setBusyMode("script");
+    setStatusLabel("Oppdaterer faglig oversikt …");
+    try {
+      const result = await studioRequest<{ academic_overview: PodcastAcademicOverview }>(
+        "/api/studio/podcast/script",
+        studioJson("POST", {
+          course_id: course.id,
+          topic_id: topicId,
+          source_text: sourceText,
+          language,
+          review_only: true,
+          existing_title: title,
+          existing_turns: activeTurns.map((t) => ({ speaker: t.speaker, text: t.text })),
+        }),
+      );
+      setAcademicOverview(result.academic_overview);
+      setOverviewStale(false);
+      setAcademicApproved(false);
+    } catch (failure) {
+      setError(messageFrom(failure));
+    } finally {
+      setBusyMode("idle");
+      setStatusLabel("");
+    }
+  }
+
+  function jumpToTurn(turnNumber: number) {
+    const target = activeTurns[turnNumber - 1] ?? turns[turnNumber - 1];
+    if (!target) return;
+    const node = turnRefs.current[target.id];
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setHighlightedTurnId(target.id);
+    if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = window.setTimeout(() => setHighlightedTurnId(null), 2400);
   }
 
   function useDirectScript() {
@@ -311,12 +412,23 @@ export function PodcastCreatorDialog({
       setTitle(selectedTopic ? `Podkast: ${selectedTopic.title}` : "Ny podkastepisode");
     }
     setTurns(initialTurns);
+    setAcademicOverview(null);
+    setOverviewStale(false);
+    setAcademicApproved(false);
     replaceGenerated(null);
     setStep("script");
   }
 
+  function markManualContentChange() {
+    if (academicOverview) {
+      setOverviewStale(true);
+      setAcademicApproved(false);
+    }
+  }
+
   function updateTurn(id: string, patch: Partial<PodcastTurn>) {
     setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    if ("text" in patch || "speaker" in patch) markManualContentChange();
   }
 
   function addTurnAfter(index: number) {
@@ -328,6 +440,7 @@ export function PodcastCreatorDialog({
       text: "",
     };
     setTurns((prev) => [...prev.slice(0, index + 1), created, ...prev.slice(index + 1)]);
+    markManualContentChange();
   }
 
   function moveTurn(index: number, delta: -1 | 1) {
@@ -339,10 +452,12 @@ export function PodcastCreatorDialog({
       copy.splice(target, 0, item);
       return copy;
     });
+    markManualContentChange();
   }
 
   function removeTurn(id: string) {
     setTurns((prev) => (prev.length > 1 ? prev.filter((t) => t.id !== id) : prev));
+    markManualContentChange();
   }
 
   async function generateAudio() {
@@ -469,35 +584,13 @@ export function PodcastCreatorDialog({
   const selectedTopic = course.topics.find((t) => t.id === topicId);
 
   return (
-    <dialog
-      ref={dialogRef}
-      aria-labelledby="podcast-creator-heading"
-      className="studio-dialog studio-dialog--wide"
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) close();
-      }}
-      onClick={(event) => {
-        if (!busy && event.target === event.currentTarget) close();
-      }}
+    <StudioModal
+      title="Lag podkast"
+      headingExtra={<span className="studio-pod-powered">Google Gemini TTS</span>}
+      busy={busy}
+      close={close}
+      wide
     >
-      <div className="studio-dialog-body">
-        <header className="studio-dialog-top">
-          <div className="studio-pod-heading">
-            <h2 id="podcast-creator-heading">Lag podkast</h2>
-            <span className="studio-pod-powered">Google Gemini TTS</span>
-          </div>
-          <button
-            type="button"
-            className="studio-icon-button"
-            onClick={close}
-            disabled={busy}
-            aria-label="Lukk"
-          >
-            <X size={20} />
-          </button>
-        </header>
-
         <nav className="studio-pod-steps" aria-label="Steg i podkastverktøyet">
           <button
             type="button"
@@ -802,7 +895,7 @@ export function PodcastCreatorDialog({
           </div>
         )}
 
-        {/* ==================== STEG 2: REDIGER MANUS & GENERER LYD ==================== */}
+        {/* ==================== STEG 2: REDIGER MANUS & FAGLIG VURDERING ==================== */}
         {step === "script" && (
           <div className="studio-form studio-pod-body">
             <label>
@@ -816,6 +909,20 @@ export function PodcastCreatorDialog({
               />
             </label>
 
+            <AcademicOverviewPanel
+              title={title}
+              overview={academicOverview}
+              stale={overviewStale}
+              approved={academicApproved}
+              busy={busy}
+              busyLabel={busyMode === "script" ? statusLabel : undefined}
+              geminiConfigured={geminiConfigured}
+              canAnalyze={activeTurns.length > 0}
+              onJumpToTurn={jumpToTurn}
+              onRefreshOverview={() => void refreshAcademicOverview()}
+              onApplyCorrection={applyAcademicCorrection}
+            />
+
             <div className="studio-nb-paste-bar">
               <button
                 type="button"
@@ -823,7 +930,7 @@ export function PodcastCreatorDialog({
                 aria-expanded={showMetaInScript}
                 onClick={() => setShowMetaInScript((v) => !v)}
               >
-                {showMetaInScript ? "Skjul beskrivelse og nøkkelpunkter" : "Rediger beskrivelse og nøkkelpunkter"}
+                {showMetaInScript ? "Skjul elevbeskrivelse og nøkkelpunkter" : "Rediger elevbeskrivelse og nøkkelpunkter"}
               </button>
               <span className="studio-pod-stats">
                 {activeTurns.length} {activeTurns.length === 1 ? "replikk" : "replikker"}
@@ -835,7 +942,7 @@ export function PodcastCreatorDialog({
             {showMetaInScript && (
               <div className="studio-nb-paste-box">
                 <label>
-                  Beskrivelse
+                  Beskrivelse (vises for elever)
                   <textarea
                     rows={2}
                     maxLength={1600}
@@ -845,7 +952,7 @@ export function PodcastCreatorDialog({
                   />
                 </label>
                 <label>
-                  Nøkkelpunkter og refleksjonsspørsmål
+                  Nøkkelpunkter og refleksjonsspørsmål (vises for elever)
                   <textarea
                     rows={4}
                     maxLength={8000}
@@ -862,7 +969,7 @@ export function PodcastCreatorDialog({
                 {busyMode === "script" ? (
                   <><LoaderCircle size={14} className="studio-spinner" /> {statusLabel}</>
                 ) : (
-                  <><Sparkles size={14} /> Juster hele manuset:</>
+                  <><Sparkles size={14} /> Hurtigjuster hele manuset:</>
                 )}
               </span>
               <div className="studio-pod-refine-btns">
@@ -886,10 +993,18 @@ export function PodcastCreatorDialog({
                 const speakerLabel = isB ? (hostBName || "Vert 2") : (hostAName || "Vert 1");
                 const styleVal = turn.style || "";
                 const hasCustomStyle = Boolean(styleVal) && !TURN_STYLES.some((s) => s.value === styleVal);
+                const isHighlighted = highlightedTurnId === turn.id;
                 return (
-                  <div key={turn.id} className={`studio-pod-turn${isB ? " studio-pod-turn--b" : ""}`}>
+                  <div
+                    key={turn.id}
+                    ref={(el) => { turnRefs.current[turn.id] = el; }}
+                    className={`studio-pod-turn${isB ? " studio-pod-turn--b" : ""}${isHighlighted ? " studio-pod-turn--highlight" : ""}`}
+                  >
                     <div className="studio-pod-turn-head">
                       <div className="studio-pod-turn-left">
+                        <span className="studio-pod-turn-num" aria-label={`Replikk nummer ${index + 1}`}>
+                          #{index + 1}
+                        </span>
                         {format === "dialogue" ? (
                           <button
                             type="button"
@@ -981,6 +1096,25 @@ export function PodcastCreatorDialog({
               <small className="studio-muted">Tips: Skriv <code>&lt;short pause&gt;</code> for en kort tenkepause.</small>
             </div>
 
+            {academicOverview && (
+              <label className={`studio-pod-approve${academicApproved ? " studio-pod-approve--checked" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={academicApproved}
+                  disabled={busy}
+                  onChange={(e) => setAcademicApproved(e.target.checked)}
+                />
+                <span>
+                  <strong>Jeg har gått gjennom den faglige oversikten og godkjenner manuset</strong>
+                  <small>
+                    {overviewStale
+                      ? "Manuset er redigert manuelt — oppdater gjerne oversikten før du godkjenner."
+                      : "Sikrer at fakta, teorier og teser er vurdert av faglærer før lyd genereres."}
+                  </small>
+                </span>
+              </label>
+            )}
+
             {progress !== null && busyMode === "tts" && (
               <div className="studio-upload-progress" role="status">
                 <span>{statusLabel}</span>
@@ -1013,7 +1147,8 @@ export function PodcastCreatorDialog({
               <button
                 type="button"
                 className="studio-button studio-button--primary"
-                disabled={busy || !activeTurns.length}
+                disabled={busy || !activeTurns.length || (Boolean(academicOverview) && !academicApproved)}
+                title={academicOverview && !academicApproved ? "Kryss av for faglig vurdering først" : undefined}
                 onClick={generateAudio}
               >
                 {busyMode === "tts" ? <LoaderCircle size={16} className="studio-spinner" /> : <Headphones size={16} />}
@@ -1044,8 +1179,19 @@ export function PodcastCreatorDialog({
                   <Download size={15} /> Last ned
                 </a>
               </div>
-              <audio src={generated.url} controls preload="metadata" />
+              <audio src={generated.url} controls preload="metadata" onPlay={pauseMainPlayer} />
             </div>
+
+            <AcademicOverviewPanel
+              title={title}
+              overview={academicOverview}
+              stale={overviewStale}
+              approved={academicApproved}
+              busy={busy}
+              geminiConfigured={geminiConfigured}
+              canAnalyze={activeTurns.length > 0}
+              compact
+            />
 
             <div className="studio-form-row">
               <label>
@@ -1069,7 +1215,7 @@ export function PodcastCreatorDialog({
             </div>
 
             <label>
-              Beskrivelse
+              Beskrivelse <span className="studio-optional">vises for elever</span>
               <textarea
                 rows={2}
                 maxLength={1600}
@@ -1080,7 +1226,7 @@ export function PodcastCreatorDialog({
             </label>
 
             <label>
-              Nøkkelpunkter og refleksjonsspørsmål
+              Nøkkelpunkter og refleksjonsspørsmål <span className="studio-optional">vises for elever</span>
               <textarea
                 rows={4}
                 maxLength={8000}
@@ -1121,7 +1267,6 @@ export function PodcastCreatorDialog({
             </div>
           </div>
         )}
-      </div>
-    </dialog>
+    </StudioModal>
   );
 }
