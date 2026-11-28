@@ -35,7 +35,7 @@ export function CachedCourseView({ code }: { code: string }) {
           <WifiOff size={28} strokeWidth={1.5} />
           <h1>Ingen nettforbindelse</h1>
           <p>Kunne ikke hente fagrommet akkurat nå, og det ligger ingen lagret kopi på denne enheten.</p>
-          <Link className="button button--primary" href="/">Til Mine fag</Link>
+          <Link className="button button--primary" href="/mine-fag">Til Mine fag</Link>
         </div>
       </div>
     );
@@ -126,7 +126,7 @@ export function CourseViewClient({ course, isCachedFallback = false }: { course:
 
   return (
     <div className="page course-view" style={accent}>
-      <Link href="/" className="back-link"><ArrowLeft size={17} /> Mine fag</Link>
+      <Link href="/mine-fag" className="back-link"><ArrowLeft size={17} /> Mine fag</Link>
 
       {isCachedFallback && (
         <div className="offline-banner" style={{ marginBottom: 18 }} role="status">

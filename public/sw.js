@@ -1,8 +1,8 @@
 // Lytterom service worker.
 // Cacher app-skall, skrifttyper og besøkte fagsider for rask oppstart og offline-lesing.
 // Mediestrømming (Range-forespørsler) og API-kall slippes alltid rett gjennom til nettverket.
-const CACHE = "lytterom-v2";
-const PRECACHE = ["/", "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png", "/apple-touch-icon.png"];
+const CACHE = "lytterom-v3";
+const PRECACHE = ["/", "/mine-fag", "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

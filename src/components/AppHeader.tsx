@@ -35,6 +35,7 @@ export function AppHeader() {
   }
 
   const studio = pathname.startsWith("/studio");
+  const mineFag = pathname === "/mine-fag" || pathname.startsWith("/fag/");
 
   return (
     <header className="app-header">
@@ -44,7 +45,7 @@ export function AppHeader() {
           <span>Lytterom</span>
         </Link>
         <nav className="app-nav" aria-label="Hovedmeny">
-          <Link href="/" aria-current={!studio ? "page" : undefined}>Mine fag</Link>
+          <Link href="/mine-fag" aria-current={mineFag ? "page" : undefined}>Mine fag</Link>
           <Link href="/studio" className={!studio ? "nav-subtle" : undefined} aria-current={studio ? "page" : undefined}>
             {studio ? "Lærerstudio" : "For lærere"}
           </Link>

@@ -47,7 +47,7 @@ export default async function CoursePage({ params }: Props) {
         <div className="empty empty--page">
           <h1>Fant ikke fagrommet</h1>
           <p>Klassekoden finnes ikke, eller læreren har slettet fagrommet. Sjekk at koden er skrevet riktig.</p>
-          <Link className="button button--primary" href="/">Til Mine fag</Link>
+          <Link className="button button--primary" href="/mine-fag">Til Mine fag</Link>
         </div>
       </div>
     );

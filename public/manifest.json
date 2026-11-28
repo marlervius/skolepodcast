@@ -4,7 +4,7 @@
   "description": "Podkaster og undervisningsvideoer fra læreren din – rett på mobilen.",
   "lang": "nb",
   "dir": "ltr",
-  "start_url": "/",
+  "start_url": "/mine-fag",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

@@ -398,6 +398,8 @@ export function HomeClient() {
       <footer className="home-foot">
         <p>Lytterom lagrer ingenting om deg. Fagene og fremgangen din ligger bare på denne enheten.</p>
         <div className="home-foot-links">
+          <Link href="/">Om Lytterom</Link>
+          <span aria-hidden="true">·</span>
           <Link href="/studio">For lærere (Lærerstudio) →</Link>
           <span aria-hidden="true">·</span>
           <Link href="/personvern">Personvern</Link>

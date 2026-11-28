@@ -13,7 +13,7 @@ const UPDATED = "25. november 2026";
 export default function PrivacyPage() {
   return (
     <div className="page">
-      <Link className="back-link" href="/">← Til Mine fag</Link>
+      <Link className="back-link" href="/mine-fag">← Til Mine fag</Link>
       <article className="prose">
         <h1>Personvern</h1>
         <p className="prose-lead">
