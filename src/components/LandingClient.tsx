@@ -26,20 +26,25 @@ import { DEMO_COURSE_ID, demoCourse, demoEpisodes, demoTopics } from "@/lib/demo
 import { fetchWithTimeout, follow, readFollowed, writeCachedSummaries } from "@/lib/followed";
 import { formatDuration, normalizeCode, type Course, type CourseSummary } from "@/lib/types";
 
+const DEMO_EPISODES = demoEpisodes.map((episode) => ({
+  ...episode,
+  media_url: `${episode.media_url}?v=2`,
+}));
+
 const DEMO_COURSE: Course = {
   id: DEMO_COURSE_ID,
   teacher_id: "",
   teacher_name: "Demolærer Historie",
   ...demoCourse,
-  episode_count: demoEpisodes.length,
+  episode_count: DEMO_EPISODES.length,
   topic_count: demoTopics.length,
   topics: demoTopics.map((topic) => ({
     ...topic,
-    episodes: demoEpisodes.filter((episode) => episode.topic_id === topic.id),
+    episodes: DEMO_EPISODES.filter((episode) => episode.topic_id === topic.id),
   })),
 };
 
-const FEATURED_EPISODE = demoEpisodes[0];
+const FEATURED_EPISODE = DEMO_EPISODES[0];
 
 const PILLARS = [
   {

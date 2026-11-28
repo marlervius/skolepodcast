@@ -31,7 +31,7 @@ const lessons: Pick<Episode, "topic_id" | "title" | "description" | "study_notes
     title: "Mellomkrigstiden på tre minutter",
     description: "Hva skjedde med demokratiet og økonomien i Europa mellom de to verdenskrigene?",
     study_notes: "• Versaillestraktaten la nye politiske og økonomiske rammer etter 1919.\n• Børskrakket i 1929 fikk følger langt utenfor USA.\n• Økonomisk krise bidro til å svekke oppslutningen om demokratiet i flere land.\n\nRefleksjon: Hvorfor kan en økonomisk krise få ulike politiske følger i ulike land?",
-    duration_seconds: 78,
+    duration_seconds: 82,
     sort_order: 0,
   },
   {
@@ -39,7 +39,7 @@ const lessons: Pick<Episode, "topic_id" | "title" | "description" | "study_notes
     title: "Hvordan begynte andre verdenskrig?",
     description: "Fra tysk opprustning og appeasement til invasjonen av Polen i september 1939.",
     study_notes: "• Münchenavtalen i 1938 lot Tyskland overta Sudetenland.\n• Tyskland og Sovjetunionen inngikk en ikke-angrepspakt i august 1939.\n• Invasjonen av Polen utløste britiske og franske krigserklæringer.\n\nRefleksjon: Hvordan kan man skille mellom langsiktige årsaker og utløsende hendelser?",
-    duration_seconds: 92,
+    duration_seconds: 80,
     sort_order: 0,
   },
   {
@@ -47,7 +47,7 @@ const lessons: Pick<Episode, "topic_id" | "title" | "description" | "study_notes
     title: "Okkupasjon og motstand i Norge",
     description: "Norge under okkupasjonen, fra 9. april 1940 til frigjøringen i 1945.",
     study_notes: "• Tyskland invaderte Norge 9. april 1940.\n• Motstanden tok både sivile og militære former.\n• Norske jøder ble arrestert og deportert med deltakelse fra norske myndighetspersoner.\n\nRefleksjon: Hvordan kan dagbøker og offentlige dokumenter fortelle ulike historier om den samme tiden?",
-    duration_seconds: 64,
+    duration_seconds: 82,
     sort_order: 1,
   },
   {
@@ -55,7 +55,7 @@ const lessons: Pick<Episode, "topic_id" | "title" | "description" | "study_notes
     title: "Den kalde krigen forklart",
     description: "Hvorfor ble det konflikt mellom USA og Sovjetunionen, og hvordan preget den resten av verden?",
     study_notes: "• Gjensidig mistillit preget forholdet mellom stormaktene etter 1945.\n• NATO og Warszawapakten organiserte militære allianser i hver sin blokk.\n• Cubakrisen i 1962 viste hvor farlig atomvåpenkappløpet kunne bli.\n\nRefleksjon: Hva skjuler ordet «kald» om hvordan krigen ble opplevd utenfor Europa?",
-    duration_seconds: 85,
+    duration_seconds: 78,
     sort_order: 0,
   },
 ];
